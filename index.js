@@ -44,7 +44,7 @@ app.post('/upload', upload.single('image'), (req, res) => {
 // Get all items
 app.get('/items', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM items');
+    const result = await pool.query('SELECT * FROM items  ORDER BY id DESC;');
     res.json(result.rows);
   } catch (err) {
     console.error(err.message);
@@ -110,7 +110,7 @@ app.delete('/items/:id', async (req, res) => {
 app.get('/salespending', async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT * FROM sales WHERE sales_status = 'SP' ORDER BY system_date DESC"
+      "SELECT * FROM sales WHERE sales_status = 'SP' ORDER BY shipment_date DESC"
     );
 
     const mappedResult = result.rows.map(row => ({
@@ -141,7 +141,7 @@ app.get('/salespending', async (req, res) => {
 app.get('/salescomplete', async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT * FROM sales WHERE sales_status = 'SD' ORDER BY system_date DESC"
+      "SELECT * FROM sales WHERE sales_status = 'SD' ORDER BY sales_date DESC"
     );
 
     const mappedResult = result.rows.map(row => ({
@@ -171,14 +171,14 @@ app.get('/salescomplete', async (req, res) => {
 // Get all sales
 app.get('/sales', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM sales');
+    const result = await pool.query('SELECT * FROM sales ORDER BY sales_date DESC');
     res.json(result.rows);
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');
   }
 });
-
+ 
 // Add a new sale
 app.post('/sales', async (req, res) => {
   const { name, items, salesDate, price, buyerDetails, phoneNumber, salesStatus, systemDate, giveAway, shipmentDate, shipmentPrice, shipmentMethod, trackingId } = req.body;

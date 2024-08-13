@@ -1,6 +1,10 @@
 --
 -- PostgreSQL database dump
 --
+DROP TABLE IF EXISTS items CASCADE;
+DROP TABLE IF EXISTS sales CASCADE;
+DROP SEQUENCE IF EXISTS items_id_seq CASCADE;
+DROP SEQUENCE IF EXISTS sales_id_seq CASCADE;
 
 -- Dumped from database version 16.3
 -- Dumped by pg_dump version 16.3
@@ -44,7 +48,7 @@ CREATE TABLE public.items (
 );
 
 
-ALTER TABLE public.items OWNER TO postgres;
+ALTER TABLE public.items OWNER TO illolam;
 
 --
 -- TOC entry 216 (class 1259 OID 16435)
@@ -60,7 +64,7 @@ CREATE SEQUENCE public.items_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.items_id_seq OWNER TO postgres;
+ALTER SEQUENCE public.items_id_seq OWNER TO illolam;
 
 --
 -- TOC entry 3607 (class 0 OID 0)
@@ -94,7 +98,7 @@ CREATE TABLE public.sales (
 );
 
 
-ALTER TABLE public.sales OWNER TO postgres;
+ALTER TABLE public.sales OWNER TO illolam;
 
 --
 -- TOC entry 218 (class 1259 OID 16504)
@@ -109,7 +113,7 @@ CREATE SEQUENCE public.sales_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.sales_id_seq OWNER TO postgres;
+ALTER SEQUENCE public.sales_id_seq OWNER TO illolam;
 
 --
 -- TOC entry 3610 (class 0 OID 0)
