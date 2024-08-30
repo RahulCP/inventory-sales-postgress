@@ -33,7 +33,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // Endpoint to handle file upload
-app.post('/upload', upload.single('image'), (req, res) => {
+app.post('/api/upload', upload.single('image'), (req, res) => {
   if (!req.file) {
     return res.status(400).send('No file uploaded.');
   }
@@ -42,7 +42,7 @@ app.post('/upload', upload.single('image'), (req, res) => {
 
 
 // Get all items
-app.get('/items', async (req, res) => {
+app.get('/api/items', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM items  ORDER BY id DESC;');
     res.json(result.rows);
@@ -52,7 +52,7 @@ app.get('/items', async (req, res) => {
   }
 });
 
-app.get('/next-seq', async (req, res) => {
+app.get('/api/next-seq', async (req, res) => {
   try {
     const result = await pool.query('SELECT nextval(\'items_id_seq\')');
     const nextSeqNum = result.rows[0].nextval;
@@ -64,7 +64,7 @@ app.get('/next-seq', async (req, res) => {
 });
 
 // Add a new item
-app.post('/items', async (req, res) => {
+app.post('/api/items', async (req, res) => {
   const { code, category, sellingprice, price, quantity, image, publish, publishedurl, boxno, systemdate, inventoryid, purchaseDate } = req.body;
   try {
     const result = await pool.query(
@@ -79,7 +79,7 @@ app.post('/items', async (req, res) => {
 });
 
 // Update an item
-app.put('/items/:id', async (req, res) => {
+app.put('/api/items/:id', async (req, res) => {
   const { id } = req.params;
   const { code, category, sellingprice, price, quantity, image, publish, publishedurl, boxno, systemdate, purchaseDate } = req.body;
   try {
@@ -95,7 +95,7 @@ app.put('/items/:id', async (req, res) => {
 });
 
 // Delete an item
-app.delete('/items/:id', async (req, res) => {
+app.delete('/api/items/:id', async (req, res) => {
   const { id } = req.params;
   try {
     await pool.query('DELETE FROM items WHERE inventoryid = $1', [id]);
@@ -107,7 +107,7 @@ app.delete('/items/:id', async (req, res) => {
 });
 
 // Get filtered and sorted pending sales
-app.get('/salespending', async (req, res) => {
+app.get('/api/salespending', async (req, res) => {
   try {
     const result = await pool.query(
       "SELECT * FROM sales WHERE sales_status = 'SP' ORDER BY shipment_date DESC"
@@ -138,7 +138,7 @@ app.get('/salespending', async (req, res) => {
 });
 
 // Get filtered and sorted completed sales
-app.get('/salescomplete', async (req, res) => {
+app.get('/api/salescomplete', async (req, res) => {
   try {
     const result = await pool.query(
       "SELECT * FROM sales WHERE sales_status = 'SD' ORDER BY sales_date DESC"
@@ -169,7 +169,7 @@ app.get('/salescomplete', async (req, res) => {
 });
 
 // Get all sales
-app.get('/sales', async (req, res) => {
+app.get('/api/sales', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM sales ORDER BY sales_date DESC');
     res.json(result.rows);
@@ -180,7 +180,7 @@ app.get('/sales', async (req, res) => {
 });
  
 // Add a new sale
-app.post('/sales', async (req, res) => {
+app.post('/api/sales', async (req, res) => {
   const { name, items, salesDate, price, buyerDetails, phoneNumber, salesStatus, systemDate, giveAway, shipmentDate, shipmentPrice, shipmentMethod, trackingId } = req.body;
   try {
     const result = await pool.query(
@@ -195,7 +195,7 @@ app.post('/sales', async (req, res) => {
 });
 
 // Update a sale
-app.put('/sales/:id', async (req, res) => {
+app.put('/api/sales/:id', async (req, res) => {
   const { id } = req.params;
   const { name, items, salesDate, price, buyerDetails, phoneNumber, salesStatus, systemDate, giveAway, shipmentDate, shipmentPrice, shipmentMethod, trackingId } = req.body;
   try {
@@ -211,7 +211,7 @@ app.put('/sales/:id', async (req, res) => {
 });
 
 // Update shipment details and sales status to 'SD'
-app.put('/sales/:id/shipment', async (req, res) => {
+app.put('/api/sales/:id/shipment', async (req, res) => {
   const { id } = req.params;
   const { shipmentDate, shipmentPrice, shipmentMethod, trackingId } = req.body;
 
@@ -228,7 +228,7 @@ app.put('/sales/:id/shipment', async (req, res) => {
 });
 
 // Update sales status to 'SP'
-app.put('/sales/:id/status', async (req, res) => {
+app.put('/api/sales/:id/status', async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -244,7 +244,7 @@ app.put('/sales/:id/status', async (req, res) => {
 });
 
 // Delete a sale
-app.delete('/sales/:id', async (req, res) => {
+app.delete('/api/sales/:id', async (req, res) => {
   const { id } = req.params;
   try {
     await pool.query('DELETE FROM sales WHERE id = $1', [id]);
