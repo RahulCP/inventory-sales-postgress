@@ -44,7 +44,7 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
 // Get all items
 app.get('/api/items', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM items  ORDER BY id DESC;');
+    const result = await pool.query('SELECT * FROM items  ORDER BY inventoryid DESC;');
     res.json(result.rows);
   } catch (err) {
     console.error(err.message);
