@@ -65,11 +65,11 @@ app.get('/api/next-seq', async (req, res) => {
 
 // Add a new item
 app.post('/api/items', async (req, res) => {
-  const { code, category, sellingprice, price, quantity, image, publish, publishedurl, boxno, systemdate, inventoryid, purchaseDate, subcategory, parent } = req.body;
+  const { code, category, sellingprice, price, quantity, image, publish, publishedurl, boxno, systemdate, inventoryid, purchaseDate, subcategory, parent, label } = req.body;
   try {
     const result = await pool.query(
-      'INSERT INTO items (code, category, sellingprice, price, quantity, image, publish, publishedurl, boxno, systemdate, inventoryid, purchaseDate, subcategory, parent) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *',
-      [code, category, sellingprice, price, quantity, image, publish, publishedurl, boxno, systemdate, inventoryid, purchaseDate, subcategory, parent]
+      'INSERT INTO items (code, category, sellingprice, price, quantity, image, publish, publishedurl, boxno, systemdate, inventoryid, purchaseDate, subcategory, parent, label) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *',
+      [code, category, sellingprice, price, quantity, image, publish, publishedurl, boxno, systemdate, inventoryid, purchaseDate, subcategory, parent, label]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -81,11 +81,11 @@ app.post('/api/items', async (req, res) => {
 // Update an item
 app.put('/api/items/:id', async (req, res) => {
   const { id } = req.params;
-  const { code, category, sellingprice, price, quantity, image, publish, publishedurl, boxno, systemdate, purchaseDate ,subcategory, parent} = req.body;
+  const { code, category, sellingprice, price, quantity, image, publish, publishedurl, boxno, systemdate, purchaseDate ,subcategory, parent, label} = req.body;
   try {
     const result = await pool.query(
-      'UPDATE items SET code = $1, category = $2, sellingprice = $3, price = $4, quantity = $5, image = $6, publish = $7, publishedurl = $8, boxno = $9, systemdate = $10, purchaseDate = $11, subcategory = $12 , parent = $13 WHERE inventoryid = $14 RETURNING *',
-      [code, category, sellingprice, price, quantity, image, publish, publishedurl, boxno, systemdate, purchaseDate, subcategory, parent, id]
+      'UPDATE items SET code = $1, category = $2, sellingprice = $3, price = $4, quantity = $5, image = $6, publish = $7, publishedurl = $8, boxno = $9, systemdate = $10, purchaseDate = $11, subcategory = $12 , parent = $13 , label = $14 WHERE inventoryid = $15 RETURNING *',
+      [code, category, sellingprice, price, quantity, image, publish, publishedurl, boxno, systemdate, purchaseDate, subcategory, parent, label,  id]
     );
     res.json(result.rows[0]);
   } catch (err) {
