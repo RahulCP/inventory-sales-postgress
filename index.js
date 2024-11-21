@@ -41,22 +41,28 @@ app.post("/api/upload", upload.single("image"), (req, res) => {
 });
 
 // Get all items or filter by category
+// Get all items or filter by category
 app.get("/api/items", async (req, res) => {
   try {
-    const { category } = req.query; // Extract 'category' from query parameters
+    const { category, webstatus } = req.query; // Extract 'category' and 'webstatus' from query parameters
 
     let query = "SELECT * FROM items";
     let queryParams = [];
 
-    if (category && category !== "All") {
-      // If category is provided and not "ALL", add WHERE clause to the query
-      query += " WHERE category = $1";
-      queryParams.push(category);
+    if (category && category !== "All" && webstatus) {
+      // If category is provided and not "All", and webstatus exists
+      query += " WHERE category = $1 AND webstatus = $2 AND parent = 1 ORDER BY priority ASC";
+      queryParams.push(category, webstatus);
+    } else if (category && category === "All" && webstatus) {
+      // If category is "All" but webstatus exists
+      query += " WHERE webstatus = $1 AND parent = 1 ORDER BY priority ASC";
+      queryParams.push(webstatus);
+    } else {
+      // Default: no filters, order by inventoryid DESC
+      query += " ORDER BY inventoryid DESC";
     }
 
-    query += " ORDER BY inventoryid DESC;"; // Always order by inventoryid DESC
-
-    // Execute the query with or without category
+    // Execute the query with the constructed parameters
     const result = await pool.query(query, queryParams);
     res.json(result.rows); // Return the result rows as JSON
   } catch (err) {
@@ -64,6 +70,7 @@ app.get("/api/items", async (req, res) => {
     res.status(500).send("Server Error"); // Send a 500 status in case of error
   }
 });
+
 
 app.get("/api/items/:id", async (req, res) => {
   const { id } = req.params;
@@ -80,7 +87,6 @@ app.get("/api/items/:id", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
-
 
 app.get("/api/next-seq", async (req, res) => {
   try {
