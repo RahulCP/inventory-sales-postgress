@@ -671,6 +671,23 @@ app.delete("/api/itemsalesrecord/salesid/:salesid", async (req, res) => {
   }
 });
 
+app.get("/api/salesrecords", async (req, res) => {
+  try {
+    // Query to select all sales records ordered by salesid in descending order
+    const result = await pool.query(
+      "SELECT * FROM itemsalesrecord"
+    );
+
+    // Send the retrieved rows as JSON
+    res.json(result.rows);
+  } catch (err) {
+    // Log and send an error response
+    console.error("Error retrieving sales records:", err.message);
+    res.status(500).send("Server Error");
+  }
+});
+
+
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
