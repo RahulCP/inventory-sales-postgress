@@ -51,7 +51,8 @@ app.get("/api/items", async (req, res) => {
 
     if (category && category !== "All" && webstatus) {
       // If category is provided and not "All", and webstatus exists
-      query += " WHERE category = $1 AND webstatus = $2 AND parent = 1 ORDER BY priority ASC";
+      query +=
+        " WHERE category = $1 AND webstatus = $2 AND parent = 1 ORDER BY priority ASC";
       queryParams.push(category, webstatus);
     } else if (category && category === "All" && webstatus) {
       // If category is "All" but webstatus exists
@@ -70,7 +71,6 @@ app.get("/api/items", async (req, res) => {
     res.status(500).send("Server Error"); // Send a 500 status in case of error
   }
 });
-
 
 app.get("/api/items/:id", async (req, res) => {
   const { id } = req.params;
@@ -232,7 +232,10 @@ app.get("/api/salespending", async (req, res) => {
       trackingId: row.tracking_id,
       pincode: row.pincode,
       state: row.state,
+      email: row.email,
       coupon: row.coupon,
+      extraDiscount: row.extradiscount,
+      extraDiscountDescription: row.extradiscountdescription
     }));
 
     res.json(mappedResult);
@@ -266,7 +269,10 @@ app.get("/api/salescomplete", async (req, res) => {
       trackingId: row.tracking_id,
       pincode: row.pincode,
       state: row.state,
+      email: row.email,
       coupon: row.coupon,
+      extraDiscount: row.extradiscount,
+      extraDiscountDescription: row.extradiscountdescription
     }));
 
     res.json(mappedResult);
@@ -308,10 +314,15 @@ app.post("/api/sales", async (req, res) => {
     pincode,
     state,
     coupon,
+    additionalDiscount,
+    extraDiscount,
+    shipment,
+    email,
+    extraDiscountDescription,
   } = req.body;
   try {
     const result = await pool.query(
-      "INSERT INTO sales (name, items, sales_date, price, buyer_details, phone_number, sales_status, system_date, give_away, shipment_date, shipment_price, shipment_method, tracking_id, pincode, state, coupon) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *",
+      "INSERT INTO sales (name, items, sales_date, price, buyer_details, phone_number, sales_status, system_date, give_away, shipment_date, shipment_price, shipment_method, tracking_id, pincode, state, coupon, additionaldiscount,extradiscount,shipment,email,extradiscountdescription) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,$19,$20,$21) RETURNING *",
       [
         name,
         items,
@@ -329,6 +340,11 @@ app.post("/api/sales", async (req, res) => {
         pincode,
         state,
         coupon,
+        additionalDiscount,
+        extraDiscount,
+        shipment,
+        email,
+        extraDiscountDescription,
       ]
     );
     res.json(result.rows[0]);
@@ -358,10 +374,15 @@ app.put("/api/sales/:id", async (req, res) => {
     pincode,
     state,
     coupon,
+    additionalDiscount,
+    extraDiscount,
+    shipment,
+    email,
+    extraDiscountDescription,
   } = req.body;
   try {
     const result = await pool.query(
-      "UPDATE sales SET name = $1, items = $2, sales_date = $3, price = $4, buyer_details = $5, phone_number = $6, sales_status = $7, system_date = $8, give_away = $9, shipment_date = $10, shipment_price = $11, shipment_method = $12, tracking_id = $13 , pincode = $15, state = $16, coupon = $17 WHERE id = $14 RETURNING *",
+      "UPDATE sales SET name = $1, items = $2, sales_date = $3, price = $4, buyer_details = $5, phone_number = $6, sales_status = $7, system_date = $8, give_away = $9, shipment_date = $10, shipment_price = $11, shipment_method = $12, tracking_id = $13 , pincode = $15, state = $16, coupon = $17, additionaldiscount=$18, extradiscount=$19, shipment=$20, email=$21, extradiscountdescription=$22  WHERE id = $14 RETURNING *",
       [
         name,
         items,
@@ -380,6 +401,11 @@ app.put("/api/sales/:id", async (req, res) => {
         pincode,
         state,
         coupon,
+        additionalDiscount,
+        extraDiscount,
+        shipment,
+        email,
+        extraDiscountDescription,
       ]
     );
     res.json(result.rows[0]);
@@ -674,9 +700,7 @@ app.delete("/api/itemsalesrecord/salesid/:salesid", async (req, res) => {
 app.get("/api/salesrecords", async (req, res) => {
   try {
     // Query to select all sales records ordered by salesid in descending order
-    const result = await pool.query(
-      "SELECT * FROM itemsalesrecord"
-    );
+    const result = await pool.query("SELECT * FROM itemsalesrecord");
 
     // Send the retrieved rows as JSON
     res.json(result.rows);
@@ -686,7 +710,6 @@ app.get("/api/salesrecords", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
-
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
