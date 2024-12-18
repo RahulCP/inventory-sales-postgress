@@ -235,7 +235,7 @@ app.get("/api/salespending", async (req, res) => {
       email: row.email,
       coupon: row.coupon,
       extraDiscount: row.extradiscount,
-      extraDiscountDescription: row.extradiscountdescription
+      extraDiscountDescription: row.extradiscountdescription,
     }));
 
     res.json(mappedResult);
@@ -272,7 +272,7 @@ app.get("/api/salescomplete", async (req, res) => {
       email: row.email,
       coupon: row.coupon,
       extraDiscount: row.extradiscount,
-      extraDiscountDescription: row.extradiscountdescription
+      extraDiscountDescription: row.extradiscountdescription,
     }));
 
     res.json(mappedResult);
@@ -711,7 +711,7 @@ app.get("/api/salesrecords", async (req, res) => {
   }
 });
 
-app.get('/api/inventory-totals', async (req, res) => {
+app.get("/api/inventory-totals", async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT inventoryid, SUM(quantity) AS total_quantity
@@ -720,43 +720,43 @@ app.get('/api/inventory-totals', async (req, res) => {
     `);
     res.json(result.rows);
   } catch (error) {
-    console.error('Error executing query', error);
-    res.status(500).send('Internal Server Error');
+    console.error("Error executing query", error);
+    res.status(500).send("Internal Server Error");
   }
 });
 
 app.get("/api/filtered-items", async (req, res) => {
   try {
     const query = `
-      SELECT 
-        i.inventoryid,
-        i.label,
-        i.category,
-        i.sellingprice,
-        i.image,
-        i.subcategory,
-        i.parent,
-        i.priority,
-        i.discount,
-        i.webcategory,
-        i.webstatus,
-        i.quantity AS quantity,
-        COALESCE(SUM(isr.quantity), 0) AS total_quantity,
-        (i.quantity - COALESCE(SUM(isr.quantity), 0)) AS difference
-      FROM 
-        items i
-      LEFT JOIN 
-        itemsalesrecord isr 
-      ON 
-        i.inventoryid = isr.inventoryid
-      WHERE 
-        i.webstatus = 1
-      GROUP BY 
-        i.inventoryid, i.label, i.category, i.sellingprice, i.image, 
-        i.subcategory, i.parent, i.priority, i.discount, i.webcategory, 
-        i.webstatus, i.quantity
-      HAVING 
-        (i.quantity - COALESCE(SUM(isr.quantity), 0)) <> 0;
+    SELECT 
+    i.inventoryid,
+    i.label,
+    i.category,
+    i.sellingprice,
+    i.image,
+    i.subcategory,
+    i.parent,
+    i.priority,
+    i.discount,
+    i.webcategory,
+    i.webstatus,
+    i.quantity AS quantity,
+    COALESCE(SUM(isr.quantity), 0) AS total_quantity,
+    (i.quantity - COALESCE(SUM(isr.quantity), 0)) AS difference
+FROM 
+    items i
+LEFT JOIN 
+    itemsalesrecord isr 
+ON 
+    i.inventoryid = isr.inventoryid
+WHERE 
+    i.webstatus = 1
+GROUP BY 
+    i.inventoryid, i.label, i.category, i.sellingprice, i.image, 
+    i.subcategory, i.parent, i.priority, i.discount, i.webcategory, 
+    i.webstatus, i.quantity
+HAVING 
+    i.quantity > COALESCE(SUM(isr.quantity), 0);
     `;
 
     const result = await pool.query(query);
@@ -810,8 +810,6 @@ app.get("/api/itemview/:id", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
-
-
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
