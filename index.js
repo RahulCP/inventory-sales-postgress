@@ -236,6 +236,7 @@ app.get("/api/salespending", async (req, res) => {
       coupon: row.coupon,
       extraDiscount: row.extradiscount,
       extraDiscountDescription: row.extradiscountdescription,
+      upiIdLastFour: row.upi_transaction_id
     }));
 
     res.json(mappedResult);
@@ -249,7 +250,7 @@ app.get("/api/salespending", async (req, res) => {
 app.get("/api/salescomplete", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT * FROM sales WHERE sales_status = 'SD' ORDER BY sales_date DESC"
+      "SELECT * FROM sales WHERE sales_status = 'SD' ORDER BY shipment_date DESC"
     );
 
     const mappedResult = result.rows.map((row) => ({
@@ -273,6 +274,7 @@ app.get("/api/salescomplete", async (req, res) => {
       coupon: row.coupon,
       extraDiscount: row.extradiscount,
       extraDiscountDescription: row.extradiscountdescription,
+      upiIdLastFour: row.upi_transaction_id
     }));
 
     res.json(mappedResult);
@@ -319,10 +321,11 @@ app.post("/api/sales", async (req, res) => {
     shipment,
     email,
     extraDiscountDescription,
+    upiLastFour
   } = req.body;
   try {
     const result = await pool.query(
-      "INSERT INTO sales (name, items, sales_date, price, buyer_details, phone_number, sales_status, system_date, give_away, shipment_date, shipment_price, shipment_method, tracking_id, pincode, state, coupon, additionaldiscount,extradiscount,shipment,email,extradiscountdescription) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,$19,$20,$21) RETURNING *",
+      "INSERT INTO sales (name, items, sales_date, price, buyer_details, phone_number, sales_status, system_date, give_away, shipment_date, shipment_price, shipment_method, tracking_id, pincode, state, coupon, additionaldiscount,extradiscount,shipment,email,extradiscountdescription,upi_transaction_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,$19,$20,$21,$22) RETURNING *",
       [
         name,
         items,
@@ -345,6 +348,7 @@ app.post("/api/sales", async (req, res) => {
         shipment,
         email,
         extraDiscountDescription,
+        upiLastFour
       ]
     );
     res.json(result.rows[0]);
@@ -418,12 +422,19 @@ app.put("/api/sales/:id", async (req, res) => {
 // Update shipment details and sales status to 'SD'
 app.put("/api/sales/:id/shipment", async (req, res) => {
   const { id } = req.params;
-  const { shipmentDate, shipmentPrice, shipmentMethod, trackingId } = req.body;
+  const { shipmentPrice, shipmentMethod, trackingId } = req.body;
 
   try {
     const result = await pool.query(
-      "UPDATE sales SET shipment_date = $1, shipment_price = $2, shipment_method = $3, tracking_id = $4, sales_status = $5 WHERE id = $6 RETURNING *",
-      [shipmentDate, shipmentPrice, shipmentMethod, trackingId, "SD", id]
+      `UPDATE sales 
+       SET shipment_date = NOW(), 
+           shipment_price = $1, 
+           shipment_method = $2, 
+           tracking_id = $3, 
+           sales_status = $4 
+       WHERE id = $5 
+       RETURNING *`,
+      [shipmentPrice, shipmentMethod, trackingId, "SD", id]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -431,6 +442,7 @@ app.put("/api/sales/:id/shipment", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
+
 
 // Update sales status to 'SP'
 app.put("/api/sales/:id/status", async (req, res) => {
