@@ -236,7 +236,7 @@ app.get("/api/salespending", async (req, res) => {
       coupon: row.coupon,
       extraDiscount: row.extradiscount,
       extraDiscountDescription: row.extradiscountdescription,
-      upiIdLastFour: row.upi_transaction_id
+      upiIdLastFour: row.upi_transaction_id,
     }));
 
     res.json(mappedResult);
@@ -274,7 +274,7 @@ app.get("/api/salescomplete", async (req, res) => {
       coupon: row.coupon,
       extraDiscount: row.extradiscount,
       extraDiscountDescription: row.extradiscountdescription,
-      upiIdLastFour: row.upi_transaction_id
+      upiIdLastFour: row.upi_transaction_id,
     }));
 
     res.json(mappedResult);
@@ -321,7 +321,7 @@ app.post("/api/sales", async (req, res) => {
     shipment,
     email,
     extraDiscountDescription,
-    upiLastFour
+    upiLastFour,
   } = req.body;
   try {
     const result = await pool.query(
@@ -348,7 +348,7 @@ app.post("/api/sales", async (req, res) => {
         shipment,
         email,
         extraDiscountDescription,
-        upiLastFour
+        upiLastFour,
       ]
     );
     res.json(result.rows[0]);
@@ -442,7 +442,6 @@ app.put("/api/sales/:id/shipment", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
-
 
 // Update sales status to 'SP'
 app.put("/api/sales/:id/status", async (req, res) => {
@@ -820,6 +819,47 @@ app.get("/api/itemview/:id", async (req, res) => {
   } catch (err) {
     console.error("Error executing query:", err.message);
     res.status(500).send("Server Error");
+  }
+});
+
+app.get("/api/salesreport", async (req, res) => {
+  try {
+    const { from, to } = req.query;
+
+    if (!from || !to) {
+      return res
+        .status(400)
+        .json({ error: "Missing 'from' and 'to' query parameters" });
+    }
+    const query = `
+      SELECT 
+          s.id AS sales_id,
+          s.price AS total_price,
+          s.sales_date,
+          s.name,
+          s.buyer_details,
+          s.pincode,
+          s.state,
+          s.phone_number,
+          s.shipment_price,
+          isr.quantity AS quantity,
+          isr.inventoryid,
+          i.label AS item_label,
+          i.price AS purchase_price,
+          i.sellingprice
+      FROM sales s
+      JOIN itemsalesrecord isr ON s.id = isr.salesid
+      JOIN items i ON isr.inventoryid = i.inventoryid
+      WHERE s.sales_date BETWEEN $1 AND $2
+      ORDER BY s.sales_date DESC;
+    `;
+
+    const { rows } = await pool.query(query, [from, to]);
+
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching sales data", error);
+    res.status(500).send("Internal Server Error");
   }
 });
 
