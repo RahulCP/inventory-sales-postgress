@@ -1,25 +1,31 @@
+require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const { Pool } = require("pg");
 const multer = require("multer");
+const crypto = require("crypto");
+const axios = require("axios");
 const path = require("path");
-const fs = require("fs");
-const moment = require("moment");
 
 const app = express();
-const port = 5005;
+const port = process.env.PORT || 5005;
 
 app.use(cors());
 app.use(bodyParser.json());
 
 const pool = new Pool({
-  user: "illolam",
-  host: "localhost",
-  database: "inventory_sales",
-  password: "illolam84",
-  port: 5432,
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASSWORD,
+  port: process.env.DB_PORT,
 });
+
+const PHONEPE_BASE_URL = process.env.PHONEPE_BASE_URL;
+const PHONEPE_MERCHANT_ID = process.env.PHONEPE_MERCHANT_ID;
+const PHONEPE_SALT_KEY = process.env.PHONEPE_SALT_KEY;
+const PHONEPE_SALT_INDEX = process.env.PHONEPE_SALT_INDEX;
 
 // Configure Multer for file uploads
 const storage = multer.diskStorage({
@@ -31,6 +37,66 @@ const storage = multer.diskStorage({
   },
 });
 const upload = multer({ storage });
+
+
+// ✅ Function to generate X-VERIFY signature
+const generateXVerify = (payload) => {
+  const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
+  const hash = crypto
+    .createHash("sha256")
+    .update(base64Payload + "/pg/v1/pay" + PHONEPE_SALT_KEY)
+    .digest("hex");
+  return `${hash}###${PHONEPE_SALT_INDEX}`;
+};
+// ==================================
+// 🚀 PhonePe Payment API Integration
+// ==================================
+app.post("/api/phonepe/initiate-payment", async (req, res) => {
+  try {
+    const { amount, transactionId, customerMobile } = req.body;
+
+    // ✅ **Corrected Payload**
+    const payload = {
+      "merchantId": "PGTESTPAYUAT77",
+      "merchantTransactionId": "MT7850590068188104",
+      "merchantUserId": "MUID123",
+      "amount": parseInt(amount * 100, 10), // ✅ Convert to paisa (integer)
+      "redirectUrl": "https://webhook.site/redirect-url",
+      "redirectMode": "REDIRECT",
+      "callbackUrl": "https://webhook.site/callback-url",
+      "mobileNumber": customerMobile,
+      "paymentInstrument": {
+        "type": "PAY_PAGE"
+      }
+    };
+
+    // ✅ Generate X-VERIFY Signature
+    const xVerify = generateXVerify(payload);
+
+    // ✅ Set Headers
+    const options = {
+      method: "post",
+      url: `${PHONEPE_BASE_URL}/pg/v1/pay`,
+      headers: {
+        accept: "application/json",
+        "Content-Type": "application/json",
+        "X-VERIFY": xVerify,  // ✅ Ensure this is correct
+      },
+      data: {
+        request: Buffer.from(JSON.stringify(payload)).toString("base64"),
+      },
+    };
+
+    // ✅ Send Request to PhonePe API
+    const response = await axios.request(options);
+
+    // ✅ Return Response
+    res.json(response.data);
+  } catch (error) {
+    console.error("PhonePe Payment Error:", error.response?.data || error.message);
+    res.status(500).json({ error: "Payment initiation failed" });
+  }
+});
 
 // Endpoint to handle file upload
 app.post("/api/upload", upload.single("image"), (req, res) => {
@@ -824,13 +890,66 @@ app.get("/api/itemview/:id", async (req, res) => {
 
 app.get("/api/salesreport", async (req, res) => {
   try {
-    const { from, to } = req.query;
+    const { from, to, status } = req.query; // ✅ Added status parameter
 
     if (!from || !to) {
       return res
         .status(400)
         .json({ error: "Missing 'from' and 'to' query parameters" });
     }
+
+    let query = `
+      SELECT 
+          s.id AS sales_id,
+          s.price AS total_price,
+          s.sales_date,
+          s.name,
+          s.buyer_details,
+          s.pincode,
+          s.state,
+          s.phone_number,
+          s.shipment_price,
+          s.sales_status,
+          isr.quantity AS quantity,
+          isr.inventoryid,
+          i.label AS item_label,
+          i.price AS purchase_price,
+          i.sellingprice,
+          i.image
+      FROM sales s
+      JOIN itemsalesrecord isr ON s.id = isr.salesid
+      JOIN items i ON isr.inventoryid = i.inventoryid
+      WHERE s.sales_date BETWEEN $1 AND $2
+    `;
+
+    const values = [from, to];
+
+    // ✅ If `status` is provided (e.g., 'SD'), filter records
+    if (status) {
+      query += ` AND s.sales_status = $3`;
+      values.push(status);
+    }
+
+    query += ` ORDER BY s.sales_date DESC;`; // ✅ Latest sales first
+
+    const { rows } = await pool.query(query, values);
+
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching sales data", error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+
+app.get("/api/salesreportbystatus", async (req, res) => {
+  try {
+    const { status } = req.query; // ✅ Get status from request query
+
+    if (!status) {
+      return res.status(400).json({ error: "Missing 'status' query parameter" });
+    }
+
     const query = `
       SELECT 
           s.id AS sales_id,
@@ -842,19 +961,21 @@ app.get("/api/salesreport", async (req, res) => {
           s.state,
           s.phone_number,
           s.shipment_price,
+          s.sales_status,
           isr.quantity AS quantity,
           isr.inventoryid,
           i.label AS item_label,
           i.price AS purchase_price,
-          i.sellingprice
+          i.sellingprice,
+          i.image
       FROM sales s
       JOIN itemsalesrecord isr ON s.id = isr.salesid
       JOIN items i ON isr.inventoryid = i.inventoryid
-      WHERE s.sales_date BETWEEN $1 AND $2
-      ORDER BY s.sales_date DESC;
+      WHERE s.sales_status = $1  -- ✅ Filter based on sales status
+      ORDER BY s.sales_date DESC;  -- ✅ Latest sales first
     `;
 
-    const { rows } = await pool.query(query, [from, to]);
+    const { rows } = await pool.query(query, [status]); // ✅ Pass status as query param
 
     res.json(rows);
   } catch (error) {
@@ -862,6 +983,7 @@ app.get("/api/salesreport", async (req, res) => {
     res.status(500).send("Internal Server Error");
   }
 });
+
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
