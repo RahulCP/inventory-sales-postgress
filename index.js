@@ -38,7 +38,6 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-
 // ✅ Function to generate X-VERIFY signature
 const generateXVerify = (payload) => {
   const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
@@ -53,23 +52,23 @@ const generateXVerify = (payload) => {
 // ==================================
 app.post("/api/phonepe/initiate-payment", async (req, res) => {
   try {
-    const { amount, transactionId, customerMobile } = req.body;
+    const { amount, transactionId, customerMobile, redirectUrl, merchantUserId } = req.body;
 
     // ✅ **Corrected Payload**
     const payload = {
-      "merchantId": "PGTESTPAYUAT77",
-      "merchantTransactionId": "MT7850590068188104",
-      "merchantUserId": "MUID123",
-      "amount": parseInt(amount * 100, 10), // ✅ Convert to paisa (integer)
-      "redirectUrl": "https://webhook.site/redirect-url",
-      "redirectMode": "REDIRECT",
-      "callbackUrl": "https://webhook.site/callback-url",
-      "mobileNumber": customerMobile,
-      "paymentInstrument": {
-        "type": "PAY_PAGE"
-      }
+      merchantId: PHONEPE_MERCHANT_ID,
+      merchantTransactionId: transactionId,
+      merchantUserId: merchantUserId,
+      amount: parseInt(amount * 100, 10), // ✅ Convert to paisa (integer)
+      redirectUrl: redirectUrl,
+      redirectMode: "REDIRECT",
+      callbackUrl: "https://www.illolam.com/api/payment-callback",
+      mobileNumber: customerMobile,
+      paymentInstrument: {
+        type: "PAY_PAGE",
+      },
     };
-
+    console.log("merchantUserId:", merchantUserId);
     // ✅ Generate X-VERIFY Signature
     const xVerify = generateXVerify(payload);
 
@@ -80,7 +79,7 @@ app.post("/api/phonepe/initiate-payment", async (req, res) => {
       headers: {
         accept: "application/json",
         "Content-Type": "application/json",
-        "X-VERIFY": xVerify,  // ✅ Ensure this is correct
+        "X-VERIFY": xVerify, // ✅ Ensure this is correct
       },
       data: {
         request: Buffer.from(JSON.stringify(payload)).toString("base64"),
@@ -93,8 +92,77 @@ app.post("/api/phonepe/initiate-payment", async (req, res) => {
     // ✅ Return Response
     res.json(response.data);
   } catch (error) {
-    console.error("PhonePe Payment Error:", error.response?.data || error.message);
+    console.error(
+      "PhonePe Payment Error:",
+      error.response?.data || error.message
+    );
     res.status(500).json({ error: "Payment initiation failed" });
+  }
+});
+
+app.post("/api/payment-callback", async (req, res) => {
+  try {
+    const { transactionId, status } = req.body;
+
+    console.log("Received PhonePe Callback:", req.body);
+
+    if (status === "PAYMENT_SUCCESS") {
+      console.log(`✅ Payment successful for Transaction ID: ${transactionId}`);
+    } else {
+      console.log(`❌ Payment failed for Transaction ID: ${transactionId}`);
+    }
+
+    // ✅ Redirect User to Frontend Payment Status Page
+   /* res.redirect(
+      `http://192.168.29.172:9000/jewels/confirmation?status=${status}&transactionId=${transactionId}`
+    );*/
+  } catch (error) {
+    console.error("Error handling callback:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ✅ API: Check PhonePe Payment Status
+app.get("/api/check-payment-status", async (req, res) => {
+  try {
+    const { transactionId } = req.query;
+    if (!transactionId) {
+      return res.status(400).json({ success: false, message: "Transaction ID is required" });
+    }
+
+    // ✅ Step 1: Construct API URL
+    const checkStatusUrl = `${PHONEPE_BASE_URL}/pg/v1/status/${PHONEPE_MERCHANT_ID}/${transactionId}`;
+
+    // ✅ Step 2: Generate X-VERIFY signature
+    const xVerifyString = `/pg/v1/status/${PHONEPE_MERCHANT_ID}/${transactionId}${PHONEPE_SALT_KEY}`;
+    const xVerify = crypto.createHash("sha256").update(xVerifyString).digest("hex") + "###" + PHONEPE_SALT_INDEX;
+
+    // ✅ Step 3: Set Headers
+    const headers = {
+      "accept": "application/json",
+      "Content-Type": "application/json",
+      "X-VERIFY": xVerify,
+    };
+
+    // ✅ Step 4: Make API Request
+    const response = await axios.get(checkStatusUrl, { headers });
+
+    // ✅ Step 5: Parse Response
+    const paymentStatus = response.data.code === "PAYMENT_SUCCESS" ? "SUCCESS" : "FAILED";
+
+    return res.json({
+      success: true,
+      status: paymentStatus,
+      transactionId: transactionId,
+      message: response.data.message || "Payment status retrieved",
+    });
+
+  } catch (error) {
+    console.error("Error checking PhonePe payment status:", error.response?.data || error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Error checking payment status",
+    });
   }
 });
 
@@ -941,13 +1009,14 @@ app.get("/api/salesreport", async (req, res) => {
   }
 });
 
-
 app.get("/api/salesreportbystatus", async (req, res) => {
   try {
     const { status } = req.query; // ✅ Get status from request query
 
     if (!status) {
-      return res.status(400).json({ error: "Missing 'status' query parameter" });
+      return res
+        .status(400)
+        .json({ error: "Missing 'status' query parameter" });
     }
 
     const query = `
@@ -983,7 +1052,6 @@ app.get("/api/salesreportbystatus", async (req, res) => {
     res.status(500).send("Internal Server Error");
   }
 });
-
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
