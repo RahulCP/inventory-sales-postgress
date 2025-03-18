@@ -145,6 +145,8 @@ app.post("/api/phonepe/initiate-payment", async (req, res) => {
       },
     };
 
+    console.log("payload:", payload);
+
     // Retrieve the access token (ensure this token is valid and has been fetched earlier)
     if (!accessToken) {
       return res.status(401).json({ error: "Access token not available" });
