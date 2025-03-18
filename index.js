@@ -7,6 +7,7 @@ const multer = require("multer");
 const crypto = require("crypto");
 const axios = require("axios");
 const path = require("path");
+const sha256 = require("sha256");
 
 const app = express();
 const port = process.env.PORT || 5005;
@@ -26,6 +27,13 @@ const PHONEPE_BASE_URL = process.env.PHONEPE_BASE_URL;
 const PHONEPE_MERCHANT_ID = process.env.PHONEPE_MERCHANT_ID;
 const PHONEPE_SALT_KEY = process.env.PHONEPE_SALT_KEY;
 const PHONEPE_SALT_INDEX = process.env.PHONEPE_SALT_INDEX;
+const PHONEPE_CLIENT_ID = process.env.PHONEPE_CLIENT_ID;
+const PHONEPE_CLIENT_SECRET = process.env.PHONEPE_CLIENT_SECRET;
+const PHONEPE_CLIENT_VERSION = process.env.PHONEPE_CLIENT_VERSION;
+
+// ✅ Set Webhook Credentials (Same as in PhonePe Dashboard)
+const AUTH_USER =  process.env.WEBHOOK_USER_NAME;; // Set this same as PhonePe Dashboard
+const AUTH_PASS =  process.env.WEBHOOK_USER_PWD;; // Set this same as PhonePe Dashboard
 
 // Configure Multer for file uploads
 const storage = multer.diskStorage({
@@ -40,131 +48,206 @@ const upload = multer({ storage });
 
 // ✅ Function to generate X-VERIFY signature
 const generateXVerify = (payload) => {
-  const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
+  const bufferObj = Buffer.from(JSON.stringify(payload), "utf8");
+
+  const base63EncodePayload = bufferObj.toString("base64");
+  const xVerify =
+    sha256(base63EncodePayload + "/pg/v1/pay" + PHONEPE_SALT_KEY) +
+    "###" +
+    PHONEPE_SALT_INDEX;
   const hash = crypto
     .createHash("sha256")
     .update(base64Payload + "/pg/v1/pay" + PHONEPE_SALT_KEY)
     .digest("hex");
   return `${hash}###${PHONEPE_SALT_INDEX}`;
 };
+
+// ==================================
+// 🚀 PhonePe Payment AUTH TOKEN
+// ==================================
+app.post("/api/phonepe/fetch-auth-token", async (req, res) => {
+  try {
+    // Prepare the payload with the required parameters.
+    const payload = {
+      client_id: PHONEPE_CLIENT_ID,
+      // Use "1" for UAT. For PROD, ensure PHONEPE_CLIENT_VERSION contains the correct value.
+      client_version: "1",
+      client_secret: PHONEPE_CLIENT_SECRET,
+      grant_type: "client_credentials",
+    };
+
+    // Set up axios options for the POST request.
+    const options = {
+      method: "post",
+      url: `${PHONEPE_BASE_URL}/v1/oauth/token`,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      },
+      data: payload,
+    };
+
+    // Call the PhonePe API to fetch the auth token.
+    const response = await axios.request(options);
+    console.log("Auth token response:", response.data);
+
+    // Return the auth token and expiry info to the caller.
+    res.json(response.data);
+  } catch (error) {
+    console.error(
+      "PhonePe Auth Token Error:",
+      error.response?.data || error.message
+    );
+    res.status(500).json({ error: "Auth token fetch failed" });
+  }
+});
 // ==================================
 // 🚀 PhonePe Payment API Integration
 // ==================================
 app.post("/api/phonepe/initiate-payment", async (req, res) => {
   try {
-    const { amount, transactionId, customerMobile, redirectUrl, merchantUserId } = req.body;
+    const {
+      amount,
+      transactionId, // This will be used as the merchantOrderId.
+      customerMobile,
+      redirectUrl,
+      merchantUserId,
+      accessToken,
+    } = req.body;
 
-    // ✅ **Corrected Payload**
+    console.log("transactionId:", transactionId);
+    console.log("merchantUserId:", merchantUserId);
+
+    // Construct the payload according to the new API spec.
+    // Note:
+    // - merchantOrderId: unique order ID (we're using transactionId).
+    // - amount: Transaction amount (in paisa, if that's the standard).
+    // - expireAfter: The time (in seconds) after which the payment request expires.
+    // - metaInfo: Additional information fields. Here we pass customerMobile and merchantUserId as udf1 and udf2.
+    // - paymentFlow: Details for payment initiation.
     const payload = {
-      merchantId: PHONEPE_MERCHANT_ID,
-      merchantTransactionId: transactionId,
-      merchantUserId: merchantUserId,
-      amount: parseInt(amount * 100, 10), // ✅ Convert to paisa (integer)
-      redirectUrl: redirectUrl,
-      redirectMode: "REDIRECT",
-      callbackUrl: "https://www.illolam.com/api/payment-callback",
-      mobileNumber: customerMobile,
-      paymentInstrument: {
-        type: "PAY_PAGE",
+      merchantOrderId: transactionId,
+      amount: amount || 10000, // Fallback to 10000 if amount is not provided.
+      expireAfter: 1200, // For example, 1200 seconds expiry.
+      metaInfo: {
+        udf1: customerMobile,
+        udf2: merchantUserId,
+        // udf3, udf4, udf5 can be added if needed.
+      },
+      paymentFlow: {
+        type: "PG_CHECKOUT",
+        message: "Payment message used for collect requests",
+        merchantUrls: {
+          redirectUrl: redirectUrl || "https://webhook.site/redirect-url",
+        },
       },
     };
-    console.log("merchantUserId:", merchantUserId);
-    // ✅ Generate X-VERIFY Signature
-    const xVerify = generateXVerify(payload);
 
-    // ✅ Set Headers
+    // Retrieve the access token (ensure this token is valid and has been fetched earlier)
+    if (!accessToken) {
+      return res.status(401).json({ error: "Access token not available" });
+    }
+
+    // Set the headers and endpoint based on your environment.
+    // For UAT, the URL should be:
+    //   https://api-preprod.phonepe.com/apis/pg-sandbox/checkout/v2/pay
+    // For PROD, the URL should be:
+    //   https://api.phonepe.com/apis/pg/checkout/v2/pay
     const options = {
       method: "post",
-      url: `${PHONEPE_BASE_URL}/pg/v1/pay`,
+      url: `${PHONEPE_BASE_URL}/checkout/v2/pay`,
       headers: {
-        accept: "application/json",
         "Content-Type": "application/json",
-        "X-VERIFY": xVerify, // ✅ Ensure this is correct
+        Accept: "application/json",
+        Authorization: `O-Bearer ${accessToken}`, // Pass the access token here.
       },
-      data: {
-        request: Buffer.from(JSON.stringify(payload)).toString("base64"),
-      },
+      data: payload,
     };
 
-    // ✅ Send Request to PhonePe API
+    // Send the request to PhonePe Payment Initiation API.
     const response = await axios.request(options);
+    console.log("Payment initiation response:", response.data);
 
-    // ✅ Return Response
+    // Return the response to the client.
     res.json(response.data);
   } catch (error) {
     console.error(
-      "PhonePe Payment Error:",
+      "PhonePe Payment Initiation Error:",
       error.response?.data || error.message
     );
     res.status(500).json({ error: "Payment initiation failed" });
   }
 });
 
-app.post("/api/payment-callback", async (req, res) => {
-  try {
-    const { transactionId, status } = req.body;
+// ✅ Webhook Endpoint with Authentication
+app.post("/api/phonepe/webhook", async (req, res) => {
+  const authHeader = req.headers.authorization;
 
-    console.log("Received PhonePe Callback:", req.body);
-
-    if (status === "PAYMENT_SUCCESS") {
-      console.log(`✅ Payment successful for Transaction ID: ${transactionId}`);
-    } else {
-      console.log(`❌ Payment failed for Transaction ID: ${transactionId}`);
-    }
-
-    // ✅ Redirect User to Frontend Payment Status Page
-   /* res.redirect(
-      `http://192.168.29.172:9000/jewels/confirmation?status=${status}&transactionId=${transactionId}`
-    );*/
-  } catch (error) {
-    console.error("Error handling callback:", error);
-    res.status(500).json({ message: "Server error" });
+  // ✅ Check if Authorization header exists
+  if (!authHeader || !authHeader.startsWith("Basic ")) {
+    return res.status(401).json({ success: false, message: "Unauthorized" });
   }
+
+  // ✅ Decode Base64 Auth Credentials
+  const base64Credentials = authHeader.split(" ")[1];
+  const credentials = Buffer.from(base64Credentials, "base64").toString("utf-8");
+  const [username, password] = credentials.split(":");
+
+  // ✅ Validate Credentials
+  if (username !== AUTH_USER || password !== AUTH_PASS) {
+    console.warn("❌ Unauthorized Webhook Access Attempt!");
+    return res.status(403).json({ success: false, message: "Forbidden" });
+  }
+
+  console.log("📩 Valid Webhook Access:", req.body);
+
+  // ✅ Process the webhook payload
+  res.status(200).json({ success: true, message: "Webhook received successfully" });
 });
 
-// ✅ API: Check PhonePe Payment Status
+// ✅ Order Status API
 app.get("/api/check-payment-status", async (req, res) => {
   try {
-    const { transactionId } = req.query;
-    if (!transactionId) {
-      return res.status(400).json({ success: false, message: "Transaction ID is required" });
+    // ✅ Step 1: Extract Merchant Order ID from query params
+    const { merchantOrderId } = req.query;
+    if (!merchantOrderId) {
+      return res.status(400).json({ success: false, message: "Merchant Order ID is required" });
     }
 
-    // ✅ Step 1: Construct API URL
-    const checkStatusUrl = `${PHONEPE_BASE_URL}/pg/v1/status/${PHONEPE_MERCHANT_ID}/${transactionId}`;
+    // ✅ Step 2: Extract Authorization Token from Headers
+    const accessToken = req.headers.authorization; // Get 'O-Bearer <token>' from frontend request
+    if (!accessToken) {
+      return res.status(401).json({ success: false, message: "Unauthorized: Missing access token" });
+    }
 
-    // ✅ Step 2: Generate X-VERIFY signature
-    const xVerifyString = `/pg/v1/status/${PHONEPE_MERCHANT_ID}/${transactionId}${PHONEPE_SALT_KEY}`;
-    const xVerify = crypto.createHash("sha256").update(xVerifyString).digest("hex") + "###" + PHONEPE_SALT_INDEX;
+    // ✅ Step 3: Construct PhonePe API Endpoint
+    const checkStatusUrl = `${PHONEPE_BASE_URL}/checkout/v2/order/${merchantOrderId}/status`;
 
-    // ✅ Step 3: Set Headers
+    // ✅ Step 4: Set Headers (Pass Access Token)
     const headers = {
-      "accept": "application/json",
       "Content-Type": "application/json",
-      "X-VERIFY": xVerify,
+      Authorization: accessToken, // Pass the token received from frontend
     };
 
-    // ✅ Step 4: Make API Request
-    const response = await axios.get(checkStatusUrl, { headers });
+    // ✅ Step 5: Make API Request
+    const { data } = await axios.get(checkStatusUrl, { headers });
 
-    // ✅ Step 5: Parse Response
-    const paymentStatus = response.data.code === "PAYMENT_SUCCESS" ? "SUCCESS" : "FAILED";
-
+    // ✅ Step 6: Return Response to Frontend
     return res.json({
       success: true,
-      status: paymentStatus,
-      transactionId: transactionId,
-      message: response.data.message || "Payment status retrieved",
+      data,
     });
 
   } catch (error) {
-    console.error("Error checking PhonePe payment status:", error.response?.data || error.message);
+    console.error("❌ Error checking PhonePe payment status:", error.response?.data || error.message);
     return res.status(500).json({
       success: false,
       message: "Error checking payment status",
     });
   }
 });
+
+
 
 // Endpoint to handle file upload
 app.post("/api/upload", upload.single("image"), (req, res) => {
