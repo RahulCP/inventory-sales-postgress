@@ -23,6 +23,8 @@ const pool = new Pool({
   port: process.env.DB_PORT,
 });
 
+
+const PHONEPE_BASE_AUTH_URL = process.env.PHONEPE_BASE_AUTH_URL;
 const PHONEPE_BASE_URL = process.env.PHONEPE_BASE_URL;
 const PHONEPE_MERCHANT_ID = process.env.PHONEPE_MERCHANT_ID;
 const PHONEPE_SALT_KEY = process.env.PHONEPE_SALT_KEY;
@@ -79,7 +81,7 @@ app.post("/api/phonepe/fetch-auth-token", async (req, res) => {
     // Set up axios options for the POST request.
     const options = {
       method: "post",
-      url: `${PHONEPE_BASE_URL}/v1/oauth/token`,
+      url: `${PHONEPE_BASE_AUTH_URL}/v1/oauth/token`,
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         Accept: "application/json",
