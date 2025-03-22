@@ -184,30 +184,75 @@ app.post("/api/phonepe/initiate-payment", async (req, res) => {
 });
 
 // ✅ Webhook Endpoint with Authentication
-app.post("/api/phonepe/webhook", async (req, res) => {
+// ✅ Webhook Endpoint with Authentication
+app.post('/api/phonepe/webhook', async(req, res) => {
+  try {
   const authHeader = req.headers.authorization;
+  console.log('INSIDE MY PERSONAL HOOK',authHeader);
+  // Check if Authorization header exists
+  //if (!authHeader || !authHeader.startsWith('SHA256 ')) {
+   // return res.status(401).json({ success: false, message: 'Unauthorized' });
+  //}
 
-  // ✅ Check if Authorization header exists
-  if (!authHeader || !authHeader.startsWith("Basic ")) {
-    return res.status(401).json({ success: false, message: "Unauthorized" });
+  // Extract the received hash
+  const receivedHash = authHeader.split(' ')[1];
+  console.log('INSIDE MY receivedHash',receivedHash);
+  // Compute the SHA256 hash of 'username:password'
+  const credentials = `${AUTH_USER}:${AUTH_PASS}`;
+  const computedHash = crypto.createHash('sha256').update(credentials).digest('hex');
+  console.log('INSIDE MY computedHash',computedHash);
+  // Validate the hash
+  if (authHeader !== computedHash) {
+    console.warn('❌ Unauthorized Webhook Access Attempt!');
+    return res.status(403).json({ success: false, message: 'Forbidden' });
   }
 
-  // ✅ Decode Base64 Auth Credentials
-  const base64Credentials = authHeader.split(" ")[1];
-  const credentials = Buffer.from(base64Credentials, "base64").toString("utf-8");
-  const [username, password] = credentials.split(":");
+  console.log('📩 Valid Webhook Access:', req.body);
 
-  // ✅ Validate Credentials
-  if (username !== AUTH_USER || password !== AUTH_PASS) {
-    console.warn("❌ Unauthorized Webhook Access Attempt!");
-    return res.status(403).json({ success: false, message: "Forbidden" });
+  // Process the webhook payload
+  const { event, payload } = req.body;
+  const upiTransactionId = payload?.transactionId;
+
+  if (!upiTransactionId) {
+    console.warn('⚠️ Missing UPI Transaction ID');
+    return res.status(400).json({ success: false, message: 'Invalid webhook payload' });
   }
 
-  console.log("📩 Valid Webhook Access:", req.body);
+  // Determine sales status
+  let salesStatus;
+  switch (event) {
+    case 'checkout.order.completed':
+      salesStatus = 'SC';
+      break;
+    case 'checkout.order.failed':
+      salesStatus = 'SF';
+      break;
+    default:
+      console.warn('⚠️ Unrecognized Event:', event);
+      return res.status(400).json({ success: false, message: 'Unknown event type' });
+  }
 
-  // ✅ Process the webhook payload
-  res.status(200).json({ success: true, message: "Webhook received successfully" });
+  // Update sales status in the database
+  const result = await pool.query(
+    "UPDATE sales SET sales_status = $1 WHERE upi_transaction_id = $2 RETURNING *",
+    [salesStatus, upiTransactionId]
+  );
+
+  if (result.rows.length === 0) {
+    console.warn('⚠️ No matching sale found for Transaction ID:', upiTransactionId);
+    return res.status(404).json({ success: false, message: 'Sale not found' });
+  }
+
+  console.log(`✅ Sales status updated to "${salesStatus}" for Transaction ID: ${upiTransactionId}`);
+  res.status(200).json({ success: true, message: 'Sales status updated successfully', sale: result.rows[0] });
+
+} catch (err) {
+  console.error('❌ Webhook Processing Error:', err.message);
+  res.status(500).json({ success: false, message: 'Internal server error' });
+}
 });
+
+
 
 // ✅ Order Status API
 app.get("/api/check-payment-status", async (req, res) => {
@@ -429,11 +474,57 @@ app.delete("/api/items/:id", async (req, res) => {
   }
 });
 
+// Get filtered by status
+app.get("/api/salesbystatus", async (req, res) => {
+  try {
+    const { sales_status } = req.query; // Get sales_status from query parameters
+
+    if (!sales_status) {
+      return res.status(400).json({ error: "sales_status query parameter is required." });
+    }
+
+    const result = await pool.query(
+      "SELECT * FROM sales WHERE sales_status = $1 ORDER BY sales_date DESC",
+      [sales_status]
+    );
+
+    const mappedResult = result.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      items: row.items,
+      salesDate: row.sales_date,
+      price: row.price,
+      buyerDetails: row.buyer_details,
+      phoneNumber: row.phone_number,
+      salesStatus: row.sales_status,
+      systemDate: row.system_date,
+      giveAway: row.give_away,
+      shipmentDate: row.shipment_date,
+      shipmentPrice: row.shipment_price,
+      shipmentMethod: row.shipment_method,
+      trackingId: row.tracking_id,
+      pincode: row.pincode,
+      state: row.state,
+      email: row.email,
+      coupon: row.coupon,
+      extraDiscount: row.extradiscount,
+      extraDiscountDescription: row.extradiscountdescription,
+      upiIdLastFour: row.upi_transaction_id,
+    }));
+
+    res.json(mappedResult);
+  } catch (err) {
+    console.error("❌ Error fetching sales:", err.message);
+    res.status(500).send("Server Error");
+  }
+});
+
+
 // Get filtered and sorted pending sales
 app.get("/api/salespending", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT * FROM sales WHERE sales_status = 'SP' ORDER BY shipment_date DESC"
+      "SELECT * FROM sales WHERE sales_status = 'SP' ORDER BY sales_date DESC"
     );
 
     const mappedResult = result.rows.map((row) => ({
@@ -518,6 +609,24 @@ app.get("/api/sales", async (req, res) => {
   }
 });
 
+app.get("/api/sales-status/:upi_transaction_id", async (req, res) => {
+  try {
+    const { upi_transaction_id } = req.params;
+
+    // Query to get sales status
+    const result = await pool.query("SELECT sales_status FROM sales WHERE upi_transaction_id = $1", [upi_transaction_id]);
+
+    if (result.rows.length > 0) {
+      res.json({ salesStatus: result.rows[0].sales_status });
+    } else {
+      res.status(404).json({ error: "Transaction ID not found" });
+    }
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
+});
+
 // Add a new sale
 app.post("/api/sales", async (req, res) => {
   const {
@@ -578,6 +687,32 @@ app.post("/api/sales", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
+
+// Update sales status by UPI Transaction ID
+app.put("/api/sales/status", async (req, res) => {
+  const { upiTransactionId, salesStatus } = req.body;
+
+  if (!upiTransactionId || !salesStatus) {
+    return res.status(400).json({ error: "upiTransactionId and salesStatus are required." });
+  }
+
+  try {
+    const result = await pool.query(
+      "UPDATE sales SET sales_status = $1 WHERE upi_transaction_id = $2 RETURNING *",
+      [salesStatus, upiTransactionId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "No sale found with the provided UPI Transaction ID." });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("Error updating sales status:", err.message);
+    res.status(500).send("Server Error");
+  }
+});
+
 
 // Update a sale
 app.put("/api/sales/:id", async (req, res) => {
