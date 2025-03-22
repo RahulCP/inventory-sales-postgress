@@ -211,7 +211,7 @@ app.post('/api/phonepe/webhook', async(req, res) => {
 
   // Process the webhook payload
   const { event, payload } = req.body;
-  const upiTransactionId = payload?.transactionId;
+  const upiTransactionId = payload?.merchantOrderId;
 
   if (!upiTransactionId) {
     console.warn('⚠️ Missing UPI Transaction ID');
