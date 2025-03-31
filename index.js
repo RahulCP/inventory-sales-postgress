@@ -33,6 +33,7 @@ const PHONEPE_CLIENT_ID = process.env.PHONEPE_CLIENT_ID;
 const PHONEPE_CLIENT_SECRET = process.env.PHONEPE_CLIENT_SECRET;
 const PHONEPE_CLIENT_VERSION = process.env.PHONEPE_CLIENT_VERSION;
 
+
 // ✅ Set Webhook Credentials (Same as in PhonePe Dashboard)
 const AUTH_USER = process.env.WEBHOOK_USER_NAME; // Set this same as PhonePe Dashboard
 const AUTH_PASS = process.env.WEBHOOK_USER_PWD; // Set this same as PhonePe Dashboard
@@ -90,7 +91,7 @@ const sendWhatsAppMessage = async (orderId, customerPhone) => {
   }
 };
 // ✅ Function to Send Email to Customer
-const sendOrderEmail = async (customerEmail, orderId) => {
+const sendOrderEmail = async (name, customerEmail, orderId) => {
   try {
     const transporter = nodemailer.createTransport({
       service: "gmail", // or use SMTP settings
@@ -104,8 +105,9 @@ const sendOrderEmail = async (customerEmail, orderId) => {
       from: "illolam.anjana@gmail.com",
       to: customerEmail,
       bcc: ["rcp.rahul@gmail.com", "ammujgd@gmail.com"],
-      subject: "Order Confirmation - Illolam Jewels",
+      subject: "Order Confirmation - Illolam",
       html: `
+        <p>Hi <strong>${name}</strong>,</p>
         <h2>Thank you for your purchase!</h2>
         <p>Your order has been successfully placed.</p>
         <p><strong>Order Number:</strong> ${orderId}</p>
@@ -318,7 +320,7 @@ app.post("/api/phonepe/webhook", async (req, res) => {
 
   
     // ✅ Send Order Confirmation Email
-    await sendOrderEmail("rcp.rahul@gmail.com", upiTransactionId);
+    await sendOrderEmail(name, email, upiTransactionId);
 
     console.log(
       `✅ Sales status updated to "${salesStatus}" for Transaction ID: ${upiTransactionId}`
