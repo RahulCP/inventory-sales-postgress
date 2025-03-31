@@ -8,6 +8,7 @@ const crypto = require("crypto");
 const axios = require("axios");
 const path = require("path");
 const sha256 = require("sha256");
+const nodemailer = require("nodemailer");
 
 const app = express();
 const port = process.env.PORT || 5005;
@@ -23,7 +24,6 @@ const pool = new Pool({
   port: process.env.DB_PORT,
 });
 
-
 const PHONEPE_BASE_AUTH_URL = process.env.PHONEPE_BASE_AUTH_URL;
 const PHONEPE_BASE_URL = process.env.PHONEPE_BASE_URL;
 const PHONEPE_MERCHANT_ID = process.env.PHONEPE_MERCHANT_ID;
@@ -34,8 +34,8 @@ const PHONEPE_CLIENT_SECRET = process.env.PHONEPE_CLIENT_SECRET;
 const PHONEPE_CLIENT_VERSION = process.env.PHONEPE_CLIENT_VERSION;
 
 // ✅ Set Webhook Credentials (Same as in PhonePe Dashboard)
-const AUTH_USER =  process.env.WEBHOOK_USER_NAME;; // Set this same as PhonePe Dashboard
-const AUTH_PASS =  process.env.WEBHOOK_USER_PWD;; // Set this same as PhonePe Dashboard
+const AUTH_USER = process.env.WEBHOOK_USER_NAME; // Set this same as PhonePe Dashboard
+const AUTH_PASS = process.env.WEBHOOK_USER_PWD; // Set this same as PhonePe Dashboard
 
 // Configure Multer for file uploads
 const storage = multer.diskStorage({
@@ -48,20 +48,76 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// ✅ Function to generate X-VERIFY signature
-const generateXVerify = (payload) => {
-  const bufferObj = Buffer.from(JSON.stringify(payload), "utf8");
+const WHATSAPP_TOKEN = "EAAWdZCqDWgIEBO2YcO2XpntBpDmlf9UZADdDdTfONNbbLKVfJAySiiemuabwptdtXCObddBZAi8PRM876mdySXfE3WR1WBurunHogHZBGYhtVoYHEVqkIcD6R7yLxkF17nCtm1ZCHZBRbXs11wD83ljIkyoFLLfbRNm8LZA7bcK1vTZBZAPTeejN2J0n8v5yHYUi9caBlN2fRxH98qrK1vZBvsNWnFqzZClnFZBeYFhgNqJz49MZD"; // Get this from Meta Developer Portal
+const WHATSAPP_PHONE_NUMBER_ID = "576866705515779"; // From Meta WhatsApp Settings
+const RECIPIENT_PHONE_NUMBER = "+919074594237"; // Format: "+919876543210"
 
-  const base63EncodePayload = bufferObj.toString("base64");
-  const xVerify =
-    sha256(base63EncodePayload + "/pg/v1/pay" + PHONEPE_SALT_KEY) +
-    "###" +
-    PHONEPE_SALT_INDEX;
-  const hash = crypto
-    .createHash("sha256")
-    .update(base64Payload + "/pg/v1/pay" + PHONEPE_SALT_KEY)
-    .digest("hex");
-  return `${hash}###${PHONEPE_SALT_INDEX}`;
+const sendWhatsAppMessage = async (orderId, customerPhone) => {
+  try {
+    const messageData = {
+      messaging_product: "whatsapp",
+      to: customerPhone,
+      type: "template",
+      template: {
+        name: "order_confirmation", // Pre-approved template name from Meta
+        language: { code: "en_US" },
+        components: [
+          {
+            type: "body",
+            parameters: [{ type: "text", text: orderId }],
+          },
+        ],
+      },
+    };
+
+    const response = await axios.post(
+      `https://graph.facebook.com/v17.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`,
+      messageData,
+      {
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log("📲 WhatsApp Message Sent:", response.data);
+  } catch (error) {
+    console.error(
+      "❌ Error Sending WhatsApp Message:",
+      error.response?.data || error.message
+    );
+  }
+};
+// ✅ Function to Send Email to Customer
+const sendOrderEmail = async (customerEmail, orderId) => {
+  try {
+    const transporter = nodemailer.createTransport({
+      service: "gmail", // or use SMTP settings
+      auth: {
+        user: "illolam.anjana@gmail.com", // Change to your email
+        pass: "zaja fxeq vsbw jlmr", // Use App Passwords for security
+      },
+    });
+
+    const mailOptions = {
+      from: "illolam.anjana@gmail.com",
+      to: customerEmail,
+      subject: "Order Confirmation - Illolam Jewels",
+      html: `
+        <h2>Thank you for your purchase!</h2>
+        <p>Your order has been successfully placed.</p>
+        <p><strong>Order Number:</strong> ${orderId}</p>
+        <p>We will notify you once your order is shipped.</p>
+        <p>Thank you for shopping with Illolam Jewels!</p>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`📧 Email sent to ${customerEmail} for order ${orderId}`);
+  } catch (error) {
+    console.error("❌ Email sending failed:", error);
+  }
 };
 
 // ==================================
@@ -113,13 +169,12 @@ app.post("/api/phonepe/initiate-payment", async (req, res) => {
       transactionId, // This will be used as the merchantOrderId.
       customerMobile,
       redirectUrl,
-      merchantUserId,
+      email,
+      name,
       accessToken,
     } = req.body;
 
     console.log("transactionId:", transactionId);
-    console.log("merchantUserId:", merchantUserId);
-
     // Construct the payload according to the new API spec.
     // Note:
     // - merchantOrderId: unique order ID (we're using transactionId).
@@ -132,8 +187,9 @@ app.post("/api/phonepe/initiate-payment", async (req, res) => {
       amount: amount || 10000, // Fallback to 10000 if amount is not provided.
       expireAfter: 1200, // For example, 1200 seconds expiry.
       metaInfo: {
-        udf1: customerMobile,
-        udf2: merchantUserId,
+        udf1: name,
+        udf2: email,
+        udf3: customerMobile,
         // udf3, udf4, udf5 can be added if needed.
       },
       paymentFlow: {
@@ -185,74 +241,99 @@ app.post("/api/phonepe/initiate-payment", async (req, res) => {
 
 // ✅ Webhook Endpoint with Authentication
 // ✅ Webhook Endpoint with Authentication
-app.post('/api/phonepe/webhook', async(req, res) => {
+app.post("/api/phonepe/webhook", async (req, res) => {
   try {
-  const authHeader = req.headers.authorization;
-  console.log('INSIDE MY PERSONAL HOOK',authHeader);
-  // Check if Authorization header exists
-  //if (!authHeader || !authHeader.startsWith('SHA256 ')) {
-   // return res.status(401).json({ success: false, message: 'Unauthorized' });
-  //}
+    const authHeader = req.headers.authorization;
+    console.log("INSIDE MY PERSONAL HOOK", authHeader);
+    // Check if Authorization header exists
+    //if (!authHeader || !authHeader.startsWith('SHA256 ')) {
+    // return res.status(401).json({ success: false, message: 'Unauthorized' });
+    //}
 
-  // Extract the received hash
-  const receivedHash = authHeader.split(' ')[1];
-  console.log('INSIDE MY receivedHash',receivedHash);
-  // Compute the SHA256 hash of 'username:password'
-  const credentials = `${AUTH_USER}:${AUTH_PASS}`;
-  const computedHash = crypto.createHash('sha256').update(credentials).digest('hex');
-  console.log('INSIDE MY computedHash',computedHash);
-  // Validate the hash
-  if (authHeader !== computedHash) {
-    console.warn('❌ Unauthorized Webhook Access Attempt!');
-    return res.status(403).json({ success: false, message: 'Forbidden' });
+    // Extract the received hash
+    const receivedHash = authHeader.split(" ")[1];
+    console.log("INSIDE MY receivedHash", receivedHash);
+    // Compute the SHA256 hash of 'username:password'
+    const credentials = `${AUTH_USER}:${AUTH_PASS}`;
+    const computedHash = crypto
+      .createHash("sha256")
+      .update(credentials)
+      .digest("hex");
+    console.log("INSIDE MY computedHash", computedHash);
+    // Validate the hash
+    if (authHeader !== computedHash) {
+      console.warn("❌ Unauthorized Webhook Access Attempt!");
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    console.log("📩 Valid Webhook Access:", req.body);
+
+    // Process the webhook payload
+    const { event, payload } = req.body;
+    const upiTransactionId = payload?.merchantOrderId;
+    const metaInfo = payload?.metaInfo;
+    const name = metaInfo?.udf1 || "N/A"; // Could be phone number, etc.
+    const email = metaInfo?.udf2 || "N/A"; // Could be user ID, etc.
+    const phone = metaInfo?.udf3 || "N/A"; // Could be user ID, etc.
+
+    if (!upiTransactionId) {
+      console.warn("⚠️ Missing UPI Transaction ID");
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid webhook payload" });
+    }
+
+    // Determine sales status
+    let salesStatus;
+    switch (event) {
+      case "checkout.order.completed":
+        salesStatus = "SC";
+        break;
+      case "checkout.order.failed":
+        salesStatus = "SF";
+        break;
+      default:
+        console.warn("⚠️ Unrecognized Event:", event);
+        return res
+          .status(400)
+          .json({ success: false, message: "Unknown event type" });
+    }
+
+    // Update sales status in the database
+    const result = await pool.query(
+      "UPDATE sales SET sales_status = $1 WHERE upi_transaction_id = $2 RETURNING *",
+      [salesStatus, upiTransactionId]
+    );
+
+    if (result.rows.length === 0) {
+      console.warn(
+        "⚠️ No matching sale found for Transaction ID:",
+        upiTransactionId
+      );
+      return res
+        .status(404)
+        .json({ success: false, message: "Sale not found" });
+    }
+
+  
+    // ✅ Send Order Confirmation Email
+    await sendOrderEmail("rcp.rahul@gmail.com", upiTransactionId);
+
+    console.log(
+      `✅ Sales status updated to "${salesStatus}" for Transaction ID: ${upiTransactionId}`
+    );
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: "Sales status updated successfully",
+        sale: result.rows[0],
+      });
+  } catch (err) {
+    console.error("❌ Webhook Processing Error:", err.message);
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
-
-  console.log('📩 Valid Webhook Access:', req.body);
-
-  // Process the webhook payload
-  const { event, payload } = req.body;
-  const upiTransactionId = payload?.merchantOrderId;
-
-  if (!upiTransactionId) {
-    console.warn('⚠️ Missing UPI Transaction ID');
-    return res.status(400).json({ success: false, message: 'Invalid webhook payload' });
-  }
-
-  // Determine sales status
-  let salesStatus;
-  switch (event) {
-    case 'checkout.order.completed':
-      salesStatus = 'SC';
-      break;
-    case 'checkout.order.failed':
-      salesStatus = 'SF';
-      break;
-    default:
-      console.warn('⚠️ Unrecognized Event:', event);
-      return res.status(400).json({ success: false, message: 'Unknown event type' });
-  }
-
-  // Update sales status in the database
-  const result = await pool.query(
-    "UPDATE sales SET sales_status = $1 WHERE upi_transaction_id = $2 RETURNING *",
-    [salesStatus, upiTransactionId]
-  );
-
-  if (result.rows.length === 0) {
-    console.warn('⚠️ No matching sale found for Transaction ID:', upiTransactionId);
-    return res.status(404).json({ success: false, message: 'Sale not found' });
-  }
-
-  console.log(`✅ Sales status updated to "${salesStatus}" for Transaction ID: ${upiTransactionId}`);
-  res.status(200).json({ success: true, message: 'Sales status updated successfully', sale: result.rows[0] });
-
-} catch (err) {
-  console.error('❌ Webhook Processing Error:', err.message);
-  res.status(500).json({ success: false, message: 'Internal server error' });
-}
 });
-
-
 
 // ✅ Order Status API
 app.get("/api/check-payment-status", async (req, res) => {
@@ -260,13 +341,20 @@ app.get("/api/check-payment-status", async (req, res) => {
     // ✅ Step 1: Extract Merchant Order ID from query params
     const { merchantOrderId } = req.query;
     if (!merchantOrderId) {
-      return res.status(400).json({ success: false, message: "Merchant Order ID is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Merchant Order ID is required" });
     }
 
     // ✅ Step 2: Extract Authorization Token from Headers
     const accessToken = req.headers.authorization; // Get 'O-Bearer <token>' from frontend request
     if (!accessToken) {
-      return res.status(401).json({ success: false, message: "Unauthorized: Missing access token" });
+      return res
+        .status(401)
+        .json({
+          success: false,
+          message: "Unauthorized: Missing access token",
+        });
     }
 
     // ✅ Step 3: Construct PhonePe API Endpoint
@@ -286,17 +374,17 @@ app.get("/api/check-payment-status", async (req, res) => {
       success: true,
       data,
     });
-
   } catch (error) {
-    console.error("❌ Error checking PhonePe payment status:", error.response?.data || error.message);
+    console.error(
+      "❌ Error checking PhonePe payment status:",
+      error.response?.data || error.message
+    );
     return res.status(500).json({
       success: false,
       message: "Error checking payment status",
     });
   }
 });
-
-
 
 // Endpoint to handle file upload
 app.post("/api/upload", upload.single("image"), (req, res) => {
@@ -480,7 +568,9 @@ app.get("/api/salesbystatus", async (req, res) => {
     const { sales_status } = req.query; // Get sales_status from query parameters
 
     if (!sales_status) {
-      return res.status(400).json({ error: "sales_status query parameter is required." });
+      return res
+        .status(400)
+        .json({ error: "sales_status query parameter is required." });
     }
 
     const result = await pool.query(
@@ -518,7 +608,6 @@ app.get("/api/salesbystatus", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
-
 
 // Get filtered and sorted pending sales
 app.get("/api/salespending", async (req, res) => {
@@ -614,7 +703,10 @@ app.get("/api/sales-status/:upi_transaction_id", async (req, res) => {
     const { upi_transaction_id } = req.params;
 
     // Query to get sales status
-    const result = await pool.query("SELECT sales_status FROM sales WHERE upi_transaction_id = $1", [upi_transaction_id]);
+    const result = await pool.query(
+      "SELECT sales_status FROM sales WHERE upi_transaction_id = $1",
+      [upi_transaction_id]
+    );
 
     if (result.rows.length > 0) {
       res.json({ salesStatus: result.rows[0].sales_status });
@@ -693,7 +785,9 @@ app.put("/api/sales/status", async (req, res) => {
   const { upiTransactionId, salesStatus } = req.body;
 
   if (!upiTransactionId || !salesStatus) {
-    return res.status(400).json({ error: "upiTransactionId and salesStatus are required." });
+    return res
+      .status(400)
+      .json({ error: "upiTransactionId and salesStatus are required." });
   }
 
   try {
@@ -703,7 +797,9 @@ app.put("/api/sales/status", async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: "No sale found with the provided UPI Transaction ID." });
+      return res
+        .status(404)
+        .json({ error: "No sale found with the provided UPI Transaction ID." });
     }
 
     res.json(result.rows[0]);
@@ -712,7 +808,6 @@ app.put("/api/sales/status", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
-
 
 // Update a sale
 app.put("/api/sales/:id", async (req, res) => {
@@ -1133,6 +1228,49 @@ HAVING
     res.status(500).send("Internal Server Error");
   }
 });
+
+app.get("/api/inventory-items-search", async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        i.inventoryid,
+        i.label,
+        i.category,
+        i.sellingprice,
+        i.price,
+        i.image,
+        i.subcategory,
+        i.parent,
+        i.priority,
+        i.discount,
+        i.webcategory,
+        i.webstatus,
+        i.boxno,
+        i.systemdate,
+        i.quantity AS quantity,
+        COALESCE(SUM(isr.quantity), 0) AS total_quantity,
+        (i.quantity - COALESCE(SUM(isr.quantity), 0)) AS difference
+      FROM 
+        items i
+      LEFT JOIN 
+        itemsalesrecord isr 
+        ON i.inventoryid = isr.inventoryid
+      GROUP BY 
+        i.inventoryid, i.label, i.category, i.sellingprice, i.image, 
+        i.subcategory, i.parent, i.priority, i.discount, i.webcategory, 
+        i.webstatus, i.quantity, i.boxno,  i.price, i.systemdate
+        ORDER BY 
+            i.systemdate DESC;
+    `;
+
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Error fetching filtered items:", error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 
 app.get("/api/itemview/:id", async (req, res) => {
   const { id } = req.params;
