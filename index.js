@@ -577,7 +577,7 @@ app.get("/api/salesbystatus", async (req, res) => {
     }
 
     const result = await pool.query(
-      "SELECT * FROM sales WHERE sales_status IN ('SC', 'SP') ORDER BY sales_date DESC"
+      "SELECT * FROM sales WHERE sales_status IN ('SC', 'SP', 'SF') ORDER BY sales_date DESC"
     );
     
     const mappedResult = result.rows.map((row) => ({
