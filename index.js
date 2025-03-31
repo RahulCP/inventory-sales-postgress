@@ -103,6 +103,7 @@ const sendOrderEmail = async (customerEmail, orderId) => {
     const mailOptions = {
       from: "illolam.anjana@gmail.com",
       to: customerEmail,
+      bcc: ["rcp.rahul@gmail.com", "ammujgd@gmail.com"],
       subject: "Order Confirmation - Illolam Jewels",
       html: `
         <h2>Thank you for your purchase!</h2>
@@ -574,10 +575,9 @@ app.get("/api/salesbystatus", async (req, res) => {
     }
 
     const result = await pool.query(
-      "SELECT * FROM sales WHERE sales_status = $1 ORDER BY sales_date DESC",
-      [sales_status]
+      "SELECT * FROM sales WHERE sales_status IN ('SC', 'SP') ORDER BY sales_date DESC"
     );
-
+    
     const mappedResult = result.rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -1371,14 +1371,6 @@ app.get("/api/salesreport", async (req, res) => {
 
 app.get("/api/salesreportbystatus", async (req, res) => {
   try {
-    const { status } = req.query; // ✅ Get status from request query
-
-    if (!status) {
-      return res
-        .status(400)
-        .json({ error: "Missing 'status' query parameter" });
-    }
-
     const query = `
       SELECT 
           s.id AS sales_id,
@@ -1400,18 +1392,18 @@ app.get("/api/salesreportbystatus", async (req, res) => {
       FROM sales s
       JOIN itemsalesrecord isr ON s.id = isr.salesid
       JOIN items i ON isr.inventoryid = i.inventoryid
-      WHERE s.sales_status = $1  -- ✅ Filter based on sales status
-      ORDER BY s.sales_date DESC;  -- ✅ Latest sales first
+      WHERE s.sales_status IN ('SC', 'SP')
+      ORDER BY s.sales_date DESC;
     `;
 
-    const { rows } = await pool.query(query, [status]); // ✅ Pass status as query param
-
+    const { rows } = await pool.query(query); // ❌ No parameters required
     res.json(rows);
   } catch (error) {
     console.error("Error fetching sales data", error);
     res.status(500).send("Internal Server Error");
   }
 });
+
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
