@@ -187,7 +187,7 @@ app.post("/api/phonepe/initiate-payment", async (req, res) => {
     // - paymentFlow: Details for payment initiation.
     const payload = {
       merchantOrderId: transactionId,
-      amount: amount || 10000, // Fallback to 10000 if amount is not provided.
+      amount: amount * 100, // Fallback to 10000 if amount is not provided.
       expireAfter: 1200, // For example, 1200 seconds expiry.
       metaInfo: {
         udf1: name,
