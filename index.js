@@ -33,10 +33,11 @@ const PHONEPE_CLIENT_ID = process.env.PHONEPE_CLIENT_ID;
 const PHONEPE_CLIENT_SECRET = process.env.PHONEPE_CLIENT_SECRET;
 const PHONEPE_CLIENT_VERSION = process.env.PHONEPE_CLIENT_VERSION;
 
-
 // ✅ Set Webhook Credentials (Same as in PhonePe Dashboard)
 const AUTH_USER = process.env.WEBHOOK_USER_NAME; // Set this same as PhonePe Dashboard
 const AUTH_PASS = process.env.WEBHOOK_USER_PWD; // Set this same as PhonePe Dashboard
+
+const EMAIL_PASS = process.env.EMAIL_PASS; // Set this same as PhonePe Dashboard
 
 // Configure Multer for file uploads
 const storage = multer.diskStorage({
@@ -49,7 +50,8 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-const WHATSAPP_TOKEN = "EAAWdZCqDWgIEBO2YcO2XpntBpDmlf9UZADdDdTfONNbbLKVfJAySiiemuabwptdtXCObddBZAi8PRM876mdySXfE3WR1WBurunHogHZBGYhtVoYHEVqkIcD6R7yLxkF17nCtm1ZCHZBRbXs11wD83ljIkyoFLLfbRNm8LZA7bcK1vTZBZAPTeejN2J0n8v5yHYUi9caBlN2fRxH98qrK1vZBvsNWnFqzZClnFZBeYFhgNqJz49MZD"; // Get this from Meta Developer Portal
+const WHATSAPP_TOKEN =
+  "EAAWdZCqDWgIEBO2YcO2XpntBpDmlf9UZADdDdTfONNbbLKVfJAySiiemuabwptdtXCObddBZAi8PRM876mdySXfE3WR1WBurunHogHZBGYhtVoYHEVqkIcD6R7yLxkF17nCtm1ZCHZBRbXs11wD83ljIkyoFLLfbRNm8LZA7bcK1vTZBZAPTeejN2J0n8v5yHYUi9caBlN2fRxH98qrK1vZBvsNWnFqzZClnFZBeYFhgNqJz49MZD"; // Get this from Meta Developer Portal
 const WHATSAPP_PHONE_NUMBER_ID = "576866705515779"; // From Meta WhatsApp Settings
 const RECIPIENT_PHONE_NUMBER = "+919074594237"; // Format: "+919876543210"
 
@@ -97,7 +99,7 @@ const sendOrderEmail = async (name, customerEmail, orderId) => {
       service: "gmail", // or use SMTP settings
       auth: {
         user: "illolam.anjana@gmail.com", // Change to your email
-        pass: "zaja fxeq vsbw jlmr", // Use App Passwords for security
+        pass: EMAIL_PASS,
       },
     });
 
@@ -122,6 +124,40 @@ const sendOrderEmail = async (name, customerEmail, orderId) => {
     console.error("❌ Email sending failed:", error);
   }
 };
+
+// ❌ Function to Send Failed Order Email
+const sendFailedOrderEmail = async (name, customerEmail, orderId) => {
+  try {
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: "illolam.anjana@gmail.com",
+        pass: EMAIL_PASS,
+      },
+    });
+
+    const mailOptions = {
+      from: "illolam.anjana@gmail.com",
+      to: customerEmail,
+      bcc: ["rcp.rahul@gmail.com", "ammujgd@gmail.com"],
+      subject: "Payment Failed - Illolam Jewels",
+      html: `
+        <p>Hi <strong>${name}</strong>,</p>
+        <h2>Oops! Something went wrong with your order.</h2>
+        <p>Unfortunately, your payment attempt has failed.</p>
+        <p><strong>Order Number:</strong> ${orderId}</p>
+        <p>Please try again or contact us if you need help.</p>
+        <p>Thank you for choosing Illolam!</p>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`📧 Failure email sent to ${customerEmail} for order ${orderId}`);
+  } catch (error) {
+    console.error("❌ Failed order email sending failed:", error);
+  }
+};
+
 
 // ==================================
 // 🚀 PhonePe Payment AUTH TOKEN
@@ -318,20 +354,21 @@ app.post("/api/phonepe/webhook", async (req, res) => {
         .json({ success: false, message: "Sale not found" });
     }
 
-  
-    // ✅ Send Order Confirmation Email
-    await sendOrderEmail(name, email, upiTransactionId);
+    // ✅ Send Email Based on Event Type
+    if (salesStatus === "SC") {
+      await sendOrderEmail(name, email, upiTransactionId); // success
+    } else if (salesStatus === "SF") {
+      await sendFailedOrderEmail(name, email, upiTransactionId); // failure
+    }
 
     console.log(
       `✅ Sales status updated to "${salesStatus}" for Transaction ID: ${upiTransactionId}`
     );
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Sales status updated successfully",
-        sale: result.rows[0],
-      });
+    res.status(200).json({
+      success: true,
+      message: "Sales status updated successfully",
+      sale: result.rows[0],
+    });
   } catch (err) {
     console.error("❌ Webhook Processing Error:", err.message);
     res.status(500).json({ success: false, message: "Internal server error" });
@@ -352,12 +389,10 @@ app.get("/api/check-payment-status", async (req, res) => {
     // ✅ Step 2: Extract Authorization Token from Headers
     const accessToken = req.headers.authorization; // Get 'O-Bearer <token>' from frontend request
     if (!accessToken) {
-      return res
-        .status(401)
-        .json({
-          success: false,
-          message: "Unauthorized: Missing access token",
-        });
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized: Missing access token",
+      });
     }
 
     // ✅ Step 3: Construct PhonePe API Endpoint
@@ -579,7 +614,7 @@ app.get("/api/salesbystatus", async (req, res) => {
     const result = await pool.query(
       "SELECT * FROM sales WHERE sales_status IN ('SC', 'SP', 'SF') ORDER BY sales_date DESC"
     );
-    
+
     const mappedResult = result.rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -1273,7 +1308,6 @@ app.get("/api/inventory-items-search", async (req, res) => {
   }
 });
 
-
 app.get("/api/itemview/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -1405,7 +1439,6 @@ app.get("/api/salesreportbystatus", async (req, res) => {
     res.status(500).send("Internal Server Error");
   }
 });
-
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
