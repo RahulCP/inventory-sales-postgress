@@ -107,14 +107,16 @@ const sendOrderEmail = async (name, customerEmail, orderId) => {
       from: "illolam.anjana@gmail.com",
       to: customerEmail,
       bcc: ["rcp.rahul@gmail.com", "ammujgd@gmail.com"],
+      replyTo: "illolam.anjana@gmail.com",
       subject: "Order Confirmation - Illolam",
+      text: `Hi ${name},\n\nThank you for your purchase!\nYour order (${orderId}) has been successfully placed.\nWe will notify you once it is shipped.\n\nThank you for shopping with Illolam Jewels!`,
       html: `
         <p>Hi <strong>${name}</strong>,</p>
         <h2>Thank you for your purchase!</h2>
         <p>Your order has been successfully placed.</p>
         <p><strong>Order Number:</strong> ${orderId}</p>
         <p>We will notify you once your order is shipped.</p>
-        <p>Thank you for shopping with Illolam Jewels!</p>
+        <p>Thank you for shopping with Illolam!</p>
       `,
     };
 
@@ -140,7 +142,9 @@ const sendFailedOrderEmail = async (name, customerEmail, orderId) => {
       from: "illolam.anjana@gmail.com",
       to: customerEmail,
       bcc: ["rcp.rahul@gmail.com", "ammujgd@gmail.com"],
-      subject: "Payment Failed - Illolam Jewels",
+      replyTo: "illolam.anjana@gmail.com",
+      subject: "Payment Failed - Illolam",
+      text: `Hi ${name},\n\nOops! Something went wrong with your order (Order ID: ${orderId}).\nPlease try again or contact us for help.\n\nThank you for choosing Illolam!`,
       html: `
         <p>Hi <strong>${name}</strong>,</p>
         <h2>Oops! Something went wrong with your order.</h2>
@@ -152,12 +156,13 @@ const sendFailedOrderEmail = async (name, customerEmail, orderId) => {
     };
 
     await transporter.sendMail(mailOptions);
-    console.log(`📧 Failure email sent to ${customerEmail} for order ${orderId}`);
+    console.log(
+      `📧 Failure email sent to ${customerEmail} for order ${orderId}`
+    );
   } catch (error) {
     console.error("❌ Failed order email sending failed:", error);
   }
 };
-
 
 // ==================================
 // 🚀 PhonePe Payment AUTH TOKEN
@@ -637,6 +642,9 @@ app.get("/api/salesbystatus", async (req, res) => {
       extraDiscount: row.extradiscount,
       extraDiscountDescription: row.extradiscountdescription,
       upiIdLastFour: row.upi_transaction_id,
+      salesType: row.sales_type,
+      createdSource: row.created_souce,
+      createdFrom: row.created_from
     }));
 
     res.json(mappedResult);
@@ -675,6 +683,9 @@ app.get("/api/salespending", async (req, res) => {
       extraDiscount: row.extradiscount,
       extraDiscountDescription: row.extradiscountdescription,
       upiIdLastFour: row.upi_transaction_id,
+      salesType: row.sales_type,
+      createdSource: row.created_souce,
+      createdFrom: row.created_from
     }));
 
     res.json(mappedResult);
@@ -713,6 +724,9 @@ app.get("/api/salescomplete", async (req, res) => {
       extraDiscount: row.extradiscount,
       extraDiscountDescription: row.extradiscountdescription,
       upiIdLastFour: row.upi_transaction_id,
+      salesType: row.sales_type,
+      createdSource: row.created_souce,
+      createdFrom: row.created_from
     }));
 
     res.json(mappedResult);
@@ -781,10 +795,13 @@ app.post("/api/sales", async (req, res) => {
     email,
     extraDiscountDescription,
     upiLastFour,
+    createdFrom,
+    createdSource,
+    salesType
   } = req.body;
   try {
     const result = await pool.query(
-      "INSERT INTO sales (name, items, sales_date, price, buyer_details, phone_number, sales_status, system_date, give_away, shipment_date, shipment_price, shipment_method, tracking_id, pincode, state, coupon, additionaldiscount,extradiscount,shipment,email,extradiscountdescription,upi_transaction_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,$19,$20,$21,$22) RETURNING *",
+      "INSERT INTO sales (name, items, sales_date, price, buyer_details, phone_number, sales_status, system_date, give_away, shipment_date, shipment_price, shipment_method, tracking_id, pincode, state, coupon, additionaldiscount,extradiscount,shipment,email,extradiscountdescription,upi_transaction_id,created_from,created_souce,sales_type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,$19,$20,$21,$22,$23,$24,$25) RETURNING *",
       [
         name,
         items,
@@ -808,6 +825,10 @@ app.post("/api/sales", async (req, res) => {
         email,
         extraDiscountDescription,
         upiLastFour,
+        createdFrom,
+        createdSource,
+        salesType,
+
       ]
     );
     res.json(result.rows[0]);
@@ -846,7 +867,7 @@ app.put("/api/sales/status", async (req, res) => {
   }
 });
 
-// Update a sale
+// Update a sale (without salesStatus)
 app.put("/api/sales/:id", async (req, res) => {
   const { id } = req.params;
   const {
@@ -856,7 +877,6 @@ app.put("/api/sales/:id", async (req, res) => {
     price,
     buyerDetails,
     phoneNumber,
-    salesStatus,
     systemDate,
     giveAway,
     shipmentDate,
@@ -871,10 +891,35 @@ app.put("/api/sales/:id", async (req, res) => {
     shipment,
     email,
     extraDiscountDescription,
+    salesType
   } = req.body;
+
   try {
     const result = await pool.query(
-      "UPDATE sales SET name = $1, items = $2, sales_date = $3, price = $4, buyer_details = $5, phone_number = $6, sales_status = $7, system_date = $8, give_away = $9, shipment_date = $10, shipment_price = $11, shipment_method = $12, tracking_id = $13 , pincode = $15, state = $16, coupon = $17, additionaldiscount=$18, extradiscount=$19, shipment=$20, email=$21, extradiscountdescription=$22  WHERE id = $14 RETURNING *",
+      `UPDATE sales SET 
+        name = $1,
+        items = $2,
+        sales_date = $3,
+        price = $4,
+        buyer_details = $5,
+        phone_number = $6,
+        system_date = $7,
+        give_away = $8,
+        shipment_date = $9,
+        shipment_price = $10,
+        shipment_method = $11,
+        tracking_id = $12,
+        pincode = $13,
+        state = $14,
+        coupon = $15,
+        additionaldiscount = $16,
+        extradiscount = $17,
+        shipment = $18,
+        email = $19,
+        extradiscountdescription = $20
+        sales_type = $21
+      WHERE id = $22
+      RETURNING *`,
       [
         name,
         items,
@@ -882,14 +927,12 @@ app.put("/api/sales/:id", async (req, res) => {
         price,
         buyerDetails,
         phoneNumber,
-        salesStatus,
         systemDate,
         giveAway,
         shipmentDate,
         shipmentPrice,
         shipmentMethod,
         trackingId,
-        id,
         pincode,
         state,
         coupon,
@@ -898,8 +941,11 @@ app.put("/api/sales/:id", async (req, res) => {
         shipment,
         email,
         extraDiscountDescription,
+        salesType,
+        id
       ]
     );
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err.message);
