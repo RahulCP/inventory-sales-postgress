@@ -916,7 +916,7 @@ app.put("/api/sales/:id", async (req, res) => {
         extradiscount = $17,
         shipment = $18,
         email = $19,
-        extradiscountdescription = $20
+        extradiscountdescription = $20,
         sales_type = $21
       WHERE id = $22
       RETURNING *`,
@@ -984,7 +984,7 @@ app.put("/api/sales/:id/status", async (req, res) => {
   try {
     const result = await pool.query(
       "UPDATE sales SET sales_status = $1 WHERE id = $2 RETURNING *",
-      ["SP", id]
+      ["SC", id]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -1192,21 +1192,91 @@ app.delete("/api/combo/:id", async (req, res) => {
 });
 
 app.post("/api/salesrecord/insert", async (req, res) => {
-  const { id: salesid, items } = req.body; // Extract salesid and items from the request body
+  const { id: salesid, items, combos = {} } = req.body;
 
   try {
-    const queries = []; // Array to hold multiple insert queries
+    const queries = [];
 
-    // Loop over items and create an INSERT query for each item
     for (const inventoryid in items) {
-      const quantity = items[inventoryid][0]; // Extract quantity (first element of the array)
+      const quantity = items[inventoryid][0];
+      const isCombo = items[inventoryid][2] === 1;
 
-      const query = `INSERT INTO itemsalesrecord (salesid, inventoryid, quantity) VALUES ($1, $2, $3)`;
-      const values = [salesid, inventoryid, quantity];
-      queries.push(pool.query(query, values)); // Push each query to the array
+      if (isCombo) {
+        const matchedCombo = combos[inventoryid]; // Access combo directly by key
+
+        if (matchedCombo && Array.isArray(matchedCombo.items)) {
+          for (const comboItem of matchedCombo.items) {
+            const comboInventoryId = comboItem.inventoryid;
+            const query = `
+              INSERT INTO itemsalesrecord (salesid, inventoryid, quantity)
+              VALUES ($1, $2, $3)
+            `;
+            queries.push(pool.query(query, [salesid, comboInventoryId, quantity]));
+          }
+        } else {
+          console.warn(`⚠️ No matching combo found for comboId ${inventoryid}`);
+        }
+      } else {
+        const query = `
+          INSERT INTO itemsalesrecord (salesid, inventoryid, quantity)
+          VALUES ($1, $2, $3)
+        `;
+        queries.push(pool.query(query, [salesid, inventoryid, quantity]));
+      }
     }
 
-    await Promise.all(queries); // Execute all insert queries in parallel
+    await Promise.all(queries);
+    res.status(200).json({ message: "Sales records inserted successfully" });
+  } catch (error) {
+    console.error("❌ Error inserting sales records:", error);
+    res.status(500).json({ error: "Failed to insert sales records" });
+  }
+});
+
+
+
+
+
+app.post("/api/salesrecord/insertnew", async (req, res) => {
+  const { id: salesid, items } = req.body;
+
+  try {
+    const queries = [];
+
+    for (const inventoryid in items) {
+      const quantity = items[inventoryid][0];
+      const isCombo = items[inventoryid][2]; // Combo flag
+
+      if (isCombo === 1) {
+        // Fetch combo items from DB
+        const comboRes = await pool.query(
+          "SELECT items FROM combo WHERE id = $1",
+          [inventoryid]
+        );
+
+        if (comboRes.rows.length > 0) {
+          const comboItems = comboRes.rows[0].items;
+
+          // Iterate and insert each combo item
+          for (const comboInventoryId of comboItems) {
+            const query = `
+              INSERT INTO itemsalesrecord (salesid, inventoryid, quantity)
+              VALUES ($1, $2, $3)
+            `;
+            queries.push(pool.query(query, [salesid, comboInventoryId, quantity]));
+          }
+        }
+      } else {
+        // Regular item, insert directly
+        const query = `
+          INSERT INTO itemsalesrecord (salesid, inventoryid, quantity)
+          VALUES ($1, $2, $3)
+        `;
+        queries.push(pool.query(query, [salesid, inventoryid, quantity]));
+      }
+    }
+
+    await Promise.all(queries);
 
     res.status(200).json({ message: "Sales records inserted successfully" });
   } catch (error) {
@@ -1214,6 +1284,7 @@ app.post("/api/salesrecord/insert", async (req, res) => {
     res.status(500).json({ error: "Failed to insert sales records" });
   }
 });
+
 
 // Delete all records for a specific salesid
 app.delete("/api/itemsalesrecord/salesid/:salesid", async (req, res) => {
