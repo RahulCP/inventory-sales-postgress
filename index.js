@@ -644,7 +644,7 @@ app.get("/api/salesbystatus", async (req, res) => {
       upiIdLastFour: row.upi_transaction_id,
       salesType: row.sales_type,
       createdSource: row.created_souce,
-      createdFrom: row.created_from
+      createdFrom: row.created_from,
     }));
 
     res.json(mappedResult);
@@ -653,6 +653,57 @@ app.get("/api/salesbystatus", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
+
+
+// Get filtered by status from Archive
+app.get("/api/salesbystatusfromarchive", async (req, res) => {
+  try {
+    const { sales_status } = req.query; // Get sales_status from query parameters
+
+    if (!sales_status) {
+      return res
+        .status(400)
+        .json({ error: "sales_status query parameter is required." });
+    }
+
+    const result = await pool.query(
+      "SELECT * FROM sales_archive WHERE sales_status IN ('SC', 'SP', 'SF') ORDER BY sales_date DESC"
+    );
+
+    const mappedResult = result.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      items: row.items,
+      salesDate: row.sales_date,
+      price: row.price,
+      buyerDetails: row.buyer_details,
+      phoneNumber: row.phone_number,
+      salesStatus: row.sales_status,
+      systemDate: row.system_date,
+      giveAway: row.give_away,
+      shipmentDate: row.shipment_date,
+      shipmentPrice: row.shipment_price,
+      shipmentMethod: row.shipment_method,
+      trackingId: row.tracking_id,
+      pincode: row.pincode,
+      state: row.state,
+      email: row.email,
+      coupon: row.coupon,
+      extraDiscount: row.extradiscount,
+      extraDiscountDescription: row.extradiscountdescription,
+      upiIdLastFour: row.upi_transaction_id,
+      salesType: row.sales_type,
+      createdSource: row.created_souce,
+      createdFrom: row.created_from,
+    }));
+
+    res.json(mappedResult);
+  } catch (err) {
+    console.error("❌ Error fetching sales:", err.message);
+    res.status(500).send("Server Error");
+  }
+});
+
 
 // Get filtered and sorted pending sales
 app.get("/api/salespending", async (req, res) => {
@@ -685,7 +736,7 @@ app.get("/api/salespending", async (req, res) => {
       upiIdLastFour: row.upi_transaction_id,
       salesType: row.sales_type,
       createdSource: row.created_souce,
-      createdFrom: row.created_from
+      createdFrom: row.created_from,
     }));
 
     res.json(mappedResult);
@@ -726,7 +777,7 @@ app.get("/api/salescomplete", async (req, res) => {
       upiIdLastFour: row.upi_transaction_id,
       salesType: row.sales_type,
       createdSource: row.created_souce,
-      createdFrom: row.created_from
+      createdFrom: row.created_from,
     }));
 
     res.json(mappedResult);
@@ -797,7 +848,7 @@ app.post("/api/sales", async (req, res) => {
     upiLastFour,
     createdFrom,
     createdSource,
-    salesType
+    salesType,
   } = req.body;
   try {
     const result = await pool.query(
@@ -828,7 +879,6 @@ app.post("/api/sales", async (req, res) => {
         createdFrom,
         createdSource,
         salesType,
-
       ]
     );
     res.json(result.rows[0]);
@@ -891,7 +941,7 @@ app.put("/api/sales/:id", async (req, res) => {
     shipment,
     email,
     extraDiscountDescription,
-    salesType
+    salesType,
   } = req.body;
 
   try {
@@ -942,7 +992,7 @@ app.put("/api/sales/:id", async (req, res) => {
         email,
         extraDiscountDescription,
         salesType,
-        id
+        id,
       ]
     );
 
@@ -993,14 +1043,37 @@ app.put("/api/sales/:id/status", async (req, res) => {
   }
 });
 
-// Delete a sale
+
+// ✅ Sales: Delete with archiving
 app.delete("/api/sales/:id", async (req, res) => {
+  const { id } = req.params;
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN"); // Start transaction
+    await client.query("SET LOCAL my.context = 'archive_enabled'");
+    await client.query("DELETE FROM sales WHERE id = $1", [id]);
+    await client.query("COMMIT"); // Commit transaction
+
+    res.json({ message: "Sale deleted and archived" });
+  } catch (err) {
+    await client.query("ROLLBACK"); // Roll back on error
+    console.error("Error in sales delete with archive:", err.message);
+    res.status(500).send("Server Error");
+  } finally {
+    client.release(); // Always release the client
+  }
+});
+
+
+// ❌ Sales: Delete without archiving
+app.delete("/api/sales/:id/raw", async (req, res) => {
   const { id } = req.params;
   try {
     await pool.query("DELETE FROM sales WHERE id = $1", [id]);
-    res.json({ message: "Sale deleted successfully" });
+    res.json({ message: "Sale deleted WITHOUT archiving" });
   } catch (err) {
-    console.error(err.message);
+    console.error("Error in raw sales delete:", err.message);
     res.status(500).send("Server Error");
   }
 });
@@ -1211,7 +1284,9 @@ app.post("/api/salesrecord/insert", async (req, res) => {
               INSERT INTO itemsalesrecord (salesid, inventoryid, quantity)
               VALUES ($1, $2, $3)
             `;
-            queries.push(pool.query(query, [salesid, comboInventoryId, quantity]));
+            queries.push(
+              pool.query(query, [salesid, comboInventoryId, quantity])
+            );
           }
         } else {
           console.warn(`⚠️ No matching combo found for comboId ${inventoryid}`);
@@ -1232,10 +1307,6 @@ app.post("/api/salesrecord/insert", async (req, res) => {
     res.status(500).json({ error: "Failed to insert sales records" });
   }
 });
-
-
-
-
 
 app.post("/api/salesrecord/insertnew", async (req, res) => {
   const { id: salesid, items } = req.body;
@@ -1263,7 +1334,9 @@ app.post("/api/salesrecord/insertnew", async (req, res) => {
               INSERT INTO itemsalesrecord (salesid, inventoryid, quantity)
               VALUES ($1, $2, $3)
             `;
-            queries.push(pool.query(query, [salesid, comboInventoryId, quantity]));
+            queries.push(
+              pool.query(query, [salesid, comboInventoryId, quantity])
+            );
           }
         }
       } else {
@@ -1286,8 +1359,43 @@ app.post("/api/salesrecord/insertnew", async (req, res) => {
 });
 
 
-// Delete all records for a specific salesid
 app.delete("/api/itemsalesrecord/salesid/:salesid", async (req, res) => {
+  const { salesid } = req.params;
+
+  if (!salesid) {
+    return res.status(400).json({ error: "Please provide salesid" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN"); // 🔁 Start transaction
+    await client.query("SET LOCAL my.context = 'archive_enabled'");
+    
+    const query = "DELETE FROM itemsalesrecord WHERE salesid = $1";
+    const result = await client.query(query, [salesid]);
+
+    await client.query("COMMIT"); // ✅ Commit if successful
+
+    if (result.rowCount === 0) {
+      return res
+        .status(404)
+        .json({ message: "No records found for the provided salesid" });
+    }
+
+    return res.status(200).json({
+      message: `All records for salesid ${salesid} deleted and archived`,
+    });
+  } catch (err) {
+    await client.query("ROLLBACK"); // ❌ Rollback on error
+    console.error("Error deleting records for salesid:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  } finally {
+    client.release(); // Always release client
+  }
+});
+
+
+app.delete("/api/itemsalesrecord/salesid/:salesid/raw", async (req, res) => {
   const { salesid } = req.params;
 
   if (!salesid) {
@@ -1305,13 +1413,14 @@ app.delete("/api/itemsalesrecord/salesid/:salesid", async (req, res) => {
     }
 
     return res.status(200).json({
-      message: `All records for salesid ${salesid} deleted successfully`,
+      message: `All records for salesid ${salesid} deleted WITHOUT archiving`,
     });
   } catch (err) {
-    console.error("Error deleting records for salesid:", err);
+    console.error("Error deleting records for salesid (raw):", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 app.get("/api/salesrecords", async (req, res) => {
   try {
