@@ -1666,6 +1666,125 @@ app.get("/api/salesreportbystatus", async (req, res) => {
   }
 });
 
+app.get("/api/coupons", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM coupon ORDER BY expirydate DESC");
+
+    const mappedCoupons = result.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      expirydate: row.expirydate,
+      category: row.category,
+      rule: row.rule,
+      active: row.active,
+      applyby: row.applyby,
+      applylist: row.applylist || [],
+    }));
+
+    res.json(mappedCoupons);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
+});
+// POST
+app.post("/api/coupons", async (req, res) => {
+  const { name, expirydate, category, rule, active, applyby, applylist } = req.body;
+  try {
+    const result = await pool.query(
+      `INSERT INTO coupon (name, expirydate, category, rule, active, applyby, applylist)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [name, expirydate, category, rule, active, applyby, applylist]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
+});
+
+// PUT
+app.put("/api/coupons/:id", async (req, res) => {
+  const { id } = req.params;
+  const { name, expirydate, category, rule, active, applyby, applylist } = req.body;
+  try {
+    const result = await pool.query(
+      `UPDATE coupon SET name = $1, expirydate = $2, category = $3, rule = $4, active = $5,
+       applyby = $6, applylist = $7 WHERE id = $8 RETURNING *`,
+      [name, expirydate, category, rule, active, applyby, applylist, id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
+});
+
+// DELETE
+app.delete("/api/coupons/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query("DELETE FROM coupon WHERE id = $1", [id]);
+    res.sendStatus(204);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
+});
+
+app.get("/api/apply-coupon-options", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT name, buyer_details, pincode, state, email, phone_number, sales_status, price, system_date AS created_at
+      FROM (
+        SELECT name, buyer_details, pincode, state, email, phone_number, sales_status, price, system_date
+        FROM sales
+        UNION ALL
+        SELECT name, buyer_details, pincode, state, email, phone_number, sales_status, price, system_date
+        FROM sales_archive
+      ) AS combined
+      WHERE price IS NOT NULL
+    `);
+
+    // Group by phone_last10
+    const grouped = {};
+
+    for (const row of result.rows) {
+      const phone_last10 = row.phone_number?.slice(-10) || "";
+      if (!/^\d{10}$/.test(phone_last10)) continue;
+
+      if (!grouped[phone_last10]) {
+        grouped[phone_last10] = {
+          phone_last10,
+          name: row.name,
+          email: row.email,
+          pincode: row.pincode,
+          state: row.state,
+          sales_status: row.sales_status,
+          price: 0,
+          count: 0,
+        };
+      }
+
+      grouped[phone_last10].price += Number(row.price || 0);
+      grouped[phone_last10].count += 1;
+    }
+
+    const output = Object.values(grouped).sort((a, b) =>
+      a.phone_last10.localeCompare(b.phone_last10)
+    );
+
+    res.json(output);
+  } catch (err) {
+    console.error("Apply coupon fetch failed", err);
+    res.status(500).send("Server Error");
+  }
+});
+
+
+
+
+
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
