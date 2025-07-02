@@ -917,7 +917,7 @@ app.put("/api/sales/status", async (req, res) => {
   }
 });
 
-// Update a sale (without salesStatus)
+// Update a sale
 app.put("/api/sales/:id", async (req, res) => {
   const { id } = req.params;
   const {
@@ -942,6 +942,7 @@ app.put("/api/sales/:id", async (req, res) => {
     email,
     extraDiscountDescription,
     salesType,
+    salesStatus
   } = req.body;
 
   try {
@@ -967,8 +968,9 @@ app.put("/api/sales/:id", async (req, res) => {
         shipment = $18,
         email = $19,
         extradiscountdescription = $20,
-        sales_type = $21
-      WHERE id = $22
+        sales_type = $21,
+        sales_status= $22
+      WHERE id = $23
       RETURNING *`,
       [
         name,
@@ -992,6 +994,7 @@ app.put("/api/sales/:id", async (req, res) => {
         email,
         extraDiscountDescription,
         salesType,
+        salesStatus,
         id,
       ]
     );
@@ -1780,6 +1783,33 @@ app.get("/api/apply-coupon-options", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
+
+app.get("/api/generalcoupons", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM coupon 
+       WHERE category = 'GENERAL' 
+       AND active = true 
+       AND expirydate >= CURRENT_DATE 
+       ORDER BY expirydate DESC`
+    );
+
+    const mappedCoupons = result.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      expirydate: row.expirydate,
+      category: row.category,
+      rule: row.rule
+    }));
+
+    res.json(mappedCoupons);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
+});
+
+
 
 
 
