@@ -654,7 +654,6 @@ app.get("/api/salesbystatus", async (req, res) => {
   }
 });
 
-
 // Get filtered by status from Archive
 app.get("/api/salesbystatusfromarchive", async (req, res) => {
   try {
@@ -703,7 +702,6 @@ app.get("/api/salesbystatusfromarchive", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
-
 
 // Get filtered and sorted pending sales
 app.get("/api/salespending", async (req, res) => {
@@ -942,7 +940,7 @@ app.put("/api/sales/:id", async (req, res) => {
     email,
     extraDiscountDescription,
     salesType,
-    salesStatus
+    salesStatus,
   } = req.body;
 
   try {
@@ -1046,7 +1044,6 @@ app.put("/api/sales/:id/status", async (req, res) => {
   }
 });
 
-
 // ✅ Sales: Delete with archiving
 app.delete("/api/sales/:id", async (req, res) => {
   const { id } = req.params;
@@ -1067,7 +1064,6 @@ app.delete("/api/sales/:id", async (req, res) => {
     client.release(); // Always release the client
   }
 });
-
 
 // ❌ Sales: Delete without archiving
 app.delete("/api/sales/:id/raw", async (req, res) => {
@@ -1361,7 +1357,6 @@ app.post("/api/salesrecord/insertnew", async (req, res) => {
   }
 });
 
-
 app.delete("/api/itemsalesrecord/salesid/:salesid", async (req, res) => {
   const { salesid } = req.params;
 
@@ -1373,7 +1368,7 @@ app.delete("/api/itemsalesrecord/salesid/:salesid", async (req, res) => {
   try {
     await client.query("BEGIN"); // 🔁 Start transaction
     await client.query("SET LOCAL my.context = 'archive_enabled'");
-    
+
     const query = "DELETE FROM itemsalesrecord WHERE salesid = $1";
     const result = await client.query(query, [salesid]);
 
@@ -1396,7 +1391,6 @@ app.delete("/api/itemsalesrecord/salesid/:salesid", async (req, res) => {
     client.release(); // Always release client
   }
 });
-
 
 app.delete("/api/itemsalesrecord/salesid/:salesid/raw", async (req, res) => {
   const { salesid } = req.params;
@@ -1423,7 +1417,6 @@ app.delete("/api/itemsalesrecord/salesid/:salesid/raw", async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 });
-
 
 app.get("/api/salesrecords", async (req, res) => {
   try {
@@ -1671,7 +1664,9 @@ app.get("/api/salesreportbystatus", async (req, res) => {
 
 app.get("/api/coupons", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM coupon ORDER BY expirydate DESC");
+    const result = await pool.query(
+      "SELECT * FROM coupon ORDER BY expirydate DESC"
+    );
 
     const mappedCoupons = result.rows.map((row) => ({
       id: row.id,
@@ -1692,7 +1687,15 @@ app.get("/api/coupons", async (req, res) => {
 });
 // POST
 app.post("/api/coupons", async (req, res) => {
-  const { name, expirydate, category, rule, active, applyby, applylist } = req.body;
+  const {
+    name,
+    expirydate,
+    category,
+    rule,
+    active,
+    applyby,
+    applylist,
+  } = req.body;
   try {
     const result = await pool.query(
       `INSERT INTO coupon (name, expirydate, category, rule, active, applyby, applylist)
@@ -1709,7 +1712,15 @@ app.post("/api/coupons", async (req, res) => {
 // PUT
 app.put("/api/coupons/:id", async (req, res) => {
   const { id } = req.params;
-  const { name, expirydate, category, rule, active, applyby, applylist } = req.body;
+  const {
+    name,
+    expirydate,
+    category,
+    rule,
+    active,
+    applyby,
+    applylist,
+  } = req.body;
   try {
     const result = await pool.query(
       `UPDATE coupon SET name = $1, expirydate = $2, category = $3, rule = $4, active = $5,
@@ -1799,7 +1810,7 @@ app.get("/api/generalcoupons", async (req, res) => {
       name: row.name,
       expirydate: row.expirydate,
       category: row.category,
-      rule: row.rule
+      rule: row.rule,
     }));
 
     res.json(mappedCoupons);
@@ -1809,11 +1820,170 @@ app.get("/api/generalcoupons", async (req, res) => {
   }
 });
 
+// POST /api/sales/restore
+app.post("/api/sales/restore", async (req, res) => {
+  const { id: saleId } = req.body;
 
+  if (!saleId || isNaN(saleId)) {
+    return res
+      .status(400)
+      .json({ error: "Valid 'id' is required in the request body." });
+  }
 
+  try {
+    const client = await pool.connect();
+    await client.query("BEGIN");
 
+    // Step 1: Get the archived sale
+    const saleRes = await client.query(
+      "SELECT * FROM sales_archive WHERE id = $1",
+      [saleId]
+    );
+    if (saleRes.rows.length === 0) {
+      return res.status(404).json({ error: "Archived sale not found." });
+    }
 
+    const sale = saleRes.rows[0];
 
+    // Destructure values from the sale object
+    const {
+      id,
+      items,
+      sales_date,
+      price,
+      buyer_details,
+      phone_number,
+      sales_status,
+      system_date,
+      give_away,
+      shipment_date,
+      shipment_price,
+      shipment_method,
+      tracking_id,
+      name,
+      pincode,
+      state,
+      coupon,
+      email,
+      extradiscount,
+      additionaldiscount,
+      extradiscountdescription,
+      shipment,
+      upi_transaction_id,
+      created_from,
+      created_souce,
+      sales_type,
+    } = sale;
+
+    // Step 2: Insert into sales
+    await client.query(
+      `INSERT INTO sales (
+        id, items, sales_date, price, buyer_details, phone_number,
+        sales_status, system_date, give_away, shipment_date, shipment_price,
+        shipment_method, tracking_id, name, pincode, state, coupon, email,
+        extradiscount, additionaldiscount, extradiscountdescription,
+        shipment, upi_transaction_id, created_from, created_souce, sales_type
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11,
+        $12, $13, $14, $15, $16, $17, $18,
+        $19, $20, $21,
+        $22, $23, $24, $25, $26
+      )`,
+      [
+        id,
+        items,
+        sales_date,
+        price,
+        buyer_details,
+        phone_number,
+        sales_status,
+        system_date,
+        give_away,
+        shipment_date,
+        shipment_price,
+        shipment_method,
+        tracking_id,
+        name,
+        pincode,
+        state,
+        coupon,
+        email,
+        extradiscount,
+        additionaldiscount,
+        extradiscountdescription,
+        shipment,
+        upi_transaction_id,
+        created_from,
+        created_souce,
+        sales_type,
+      ]
+    );
+
+    // Step 3: Restore itemsalesrecord
+    const itemsRes = await client.query(
+      "SELECT * FROM itemsalesrecord_archive WHERE salesid = $1",
+      [saleId]
+    );
+
+    for (const item of itemsRes.rows) {
+      const { id, salesid, inventoryid, quantity } = item;
+      await client.query(
+        `INSERT INTO itemsalesrecord (id, salesid, inventoryid, quantity)
+         VALUES ($1, $2, $3, $4)`,
+        [id, salesid, inventoryid, quantity]
+      );
+    }
+
+    // Step 4: Delete from archive tables
+    await client.query("DELETE FROM sales_archive WHERE id = $1", [saleId]);
+    await client.query(
+      "DELETE FROM itemsalesrecord_archive WHERE salesid = $1",
+      [saleId]
+    );
+
+    await client.query("COMMIT");
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: `Sale ${saleId} restored successfully.`,
+      });
+  } catch (err) {
+    console.error("Restore failed:", err.message);
+    res.status(500).send("Server Error: Restore failed.");
+  }
+});
+
+// POST /api/sales/delete-archive
+app.post("/api/sales/delete-archive", async (req, res) => {
+  const { id: saleId } = req.body;
+
+  if (!saleId || isNaN(saleId)) {
+    return res.status(400).json({ error: "Valid sale ID required." });
+  }
+
+  try {
+    const client = await pool.connect();
+    await client.query("BEGIN");
+
+    await client.query(
+      "DELETE FROM itemsalesrecord_archive WHERE salesid = $1",
+      [saleId]
+    );
+    await client.query("DELETE FROM sales_archive WHERE id = $1", [saleId]);
+
+    await client.query("COMMIT");
+
+    res.json({
+      success: true,
+      message: `Archived sale ${saleId} permanently deleted.`,
+    });
+  } catch (err) {
+    console.error("Permanent delete failed:", err.message);
+    res.status(500).send("Server Error: Permanent delete failed.");
+  }
+});
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
