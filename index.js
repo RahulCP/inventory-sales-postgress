@@ -127,6 +127,8 @@ const sendOrderEmail = async (name, customerEmail, orderId) => {
   }
 };
 
+
+
 // ❌ Function to Send Failed Order Email
 const sendFailedOrderEmail = async (name, customerEmail, orderId) => {
   try {
@@ -163,6 +165,176 @@ const sendFailedOrderEmail = async (name, customerEmail, orderId) => {
     console.error("❌ Failed order email sending failed:", error);
   }
 };
+
+
+
+
+
+
+// ===== Delhivery: Create Shipment =====
+const DELHIVERY_BASE_URL = process.env.DELHIVERY_BASE_URL || "https://staging-express.delhivery.com";
+const DELHIVERY_TOKEN = process.env.DELHIVERY_TOKEN;
+const DELHIVERY_PICKUP_NAME = process.env.DELHIVERY_PICKUP_NAME;
+
+// helper to remove chars Delhivery doesn't accept in raw JSON (& # % ; \)
+const dlvClean = (v) => (v == null ? v : String(v).replace(/[&#%\\;]/g, " ").trim());
+
+// Build URL-encoded body: format=json&data=<JSON>
+const buildFormBody = (payload) =>
+  new URLSearchParams({ format: "json", data: JSON.stringify(payload) });
+
+/**
+ * createDelhiveryShipment
+ * @param {Object} params
+ * @param {"Prepaid"|"COD"|"Pickup"|"REPL"} params.paymentMode
+ * @param {Array<Object>} params.boxes - one or more boxes; for MPS pass shipment_type="MPS", waybill, master_id, mps_children, mps_amount
+ * @param {String} params.orderId - unique order id (for MPS we will suffix per box if not provided per-box)
+ * @param {String} [params.pickupLocationName]
+ */
+async function createDelhiveryShipment({ paymentMode = "Prepaid", boxes, orderId, pickupLocationName }) {
+  if (!DELHIVERY_TOKEN) throw new Error("DELHIVERY_TOKEN missing");
+  const pickupName = pickupLocationName || DELHIVERY_PICKUP_NAME;
+  if (!pickupName) throw new Error("DELHIVERY_PICKUP_NAME missing");
+
+  if (!Array.isArray(boxes) || boxes.length === 0) throw new Error("boxes[] required");
+
+  // normalize/clean each box
+  const shipments = boxes.map((b, i) => {
+    const s = { ...b };
+    // set per-box defaults
+    s.payment_mode = b.payment_mode || paymentMode;
+    s.order = b.order || (orderId ? `${orderId}${boxes.length > 1 ? `-B${i + 1}` : ""}` : undefined);
+
+    // clean strings Delhivery dislikes
+    ["name","add","city","state","country","products_desc","hsn_code","seller_add","seller_name","seller_inv","address_type",
+     "return_name","return_add","return_city","return_state","return_country"].forEach(k => s[k] = dlvClean(s[k]));
+
+    // numbers as strings per API habit
+    ["pin","return_pin","weight","shipment_height","shipment_width","shipment_length","cod_amount","total_amount",
+     "mps_amount","mps_children"].forEach(k => { if (s[k] != null) s[k] = String(s[k]); });
+
+    // basic validation
+    for (const reqK of ["name","add","pin","phone","order"]) {
+      if (!s[reqK]) throw new Error(`Missing required field: ${reqK}`);
+    }
+    return s;
+  });
+
+  const payload = {
+    shipments,
+    pickup_location: { name: pickupName }
+  };
+
+  const body = buildFormBody(payload);
+  const url = `${DELHIVERY_BASE_URL}/api/cmu/create.json`;
+
+  const { data } = await axios.post(url, body, {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Token ${DELHIVERY_TOKEN}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    timeout: 15000
+  });
+
+  return data; // Delhivery response (contains waybill / packages info)
+}
+
+// POST /api/shipping/delhivery/create
+// Body: { orderId, paymentMode, pickupLocationName?, boxes: [ {name,add,pin,city,state,country,phone,products_desc,...} ] }
+app.post("/api/shipping/delhivery/create", async (req, res) => {
+  try {
+    const { orderId, paymentMode = "Prepaid", pickupLocationName, boxes = [] } = req.body;
+
+    const dlvRes = await createDelhiveryShipment({
+      paymentMode,
+      boxes,
+      orderId,
+      pickupLocationName
+    });
+
+    // Try to extract a waybill for convenience
+    const waybill =
+      dlvRes?.waybill ||
+      dlvRes?.packages?.[0]?.waybill ||
+      dlvRes?.package?.waybill ||
+      null;
+
+    return res.json({ ok: true, waybill, delhivery: dlvRes });
+  } catch (e) {
+    console.error("Delhivery create error:", e.response?.data || e.message);
+    return res.status(400).json({ ok: false, error: e.response?.data || e.message });
+  }
+});
+// POST /api/sales/:id/ship
+// Body (optional): { paymentMode, pickupLocationName, override: { add, city, state, pin, phone, products_desc, weight, cod_amount, total_amount } }
+app.post("/api/sales/:id/ship", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { paymentMode = "Prepaid", pickupLocationName, override = {} } = req.body;
+
+    const { rows } = await client.query(
+      "SELECT id, name, buyer_details, phone_number, pincode, state, price, email FROM sales WHERE id = $1",
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ ok: false, error: "Sale not found" });
+
+    const s = rows[0];
+
+    // Minimal mapping (tweak as per your data)
+    const box = {
+      name: s.name || "Customer",
+      phone: override.phone || s.phone_number,
+      add:   override.add || s.buyer_details,              // your buyer_details should contain address line(s)
+      pin:   override.pin || s.pincode,
+      city:  override.city || s.state || "NA",             // improve if you store city separately
+      state: override.state || s.state || "NA",
+      country: "India",
+      products_desc: override.products_desc || "Jewellery",
+      weight: override.weight || "300",                    // grams
+      shipment_width: "20",
+      shipment_height: "5",
+      shipment_length: "20",
+      shipping_mode: "Surface",
+      cod_amount: paymentMode === "COD" ? String(override.cod_amount || s.price || 0) : "0",
+      total_amount: String(override.total_amount || s.price || 0),
+      address_type: "home",
+      order: `ILL-${s.id}`,                                // must be unique
+      payment_mode: paymentMode
+    };
+
+    const dlvRes = await createDelhiveryShipment({
+      paymentMode,
+      boxes: [box],
+      orderId: box.order,
+      pickupLocationName
+    });
+
+    const waybill =
+      dlvRes?.waybill ||
+      dlvRes?.packages?.[0]?.waybill ||
+      dlvRes?.package?.waybill ||
+      null;
+
+    // persist tracking id + method
+    if (waybill) {
+      await client.query(
+        `UPDATE sales
+         SET tracking_id = $1, shipment_method = 'Delhivery', shipment_date = NOW(), sales_status = 'SD'
+         WHERE id = $2`,
+        [waybill, id]
+      );
+    }
+
+    return res.json({ ok: true, waybill, delhivery: dlvRes });
+  } catch (e) {
+    console.error("Delhivery ship error:", e.response?.data || e.message);
+    return res.status(400).json({ ok: false, error: e.response?.data || e.message });
+  } finally {
+    client.release();
+  }
+});
 
 // ==================================
 // 🚀 PhonePe Payment AUTH TOKEN
