@@ -1823,7 +1823,7 @@ app.get("/api/salesreportbystatus", async (req, res) => {
       JOIN itemsalesrecord isr ON s.id = isr.salesid
       JOIN items i ON isr.inventoryid = i.inventoryid
       WHERE s.sales_status IN ('SC', 'SP')
-      ORDER BY s.sales_date DESC;
+      ORDER BY s.sales_status DESC;
     `;
 
     const { rows } = await pool.query(query); // ❌ No parameters required
