@@ -10,6 +10,8 @@ const path = require("path");
 const sha256 = require("sha256");
 const nodemailer = require("nodemailer");
 
+const Razorpay = require("razorpay");
+
 const app = express();
 const port = process.env.PORT || 5005;
 
@@ -22,6 +24,11 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   password: process.env.DB_PASSWORD,
   port: process.env.DB_PORT,
+});
+
+const rzp = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
 const PHONEPE_BASE_AUTH_URL = process.env.PHONEPE_BASE_AUTH_URL;
@@ -38,6 +45,106 @@ const AUTH_USER = process.env.WEBHOOK_USER_NAME; // Set this same as PhonePe Das
 const AUTH_PASS = process.env.WEBHOOK_USER_PWD; // Set this same as PhonePe Dashboard
 
 const EMAIL_PASS = process.env.EMAIL_PASS; // Set this same as PhonePe Dashboard
+
+
+
+
+// ─────────────────────────────────────────────────────────────
+// RAZORPAY: Create Order (client sends amount in RUPEES)
+// POST /api/pay/razorpay/order
+// body: { amount: number, notes?: object }
+// returns: { order: {...} }  // id, amount, currency, receipt...
+// ─────────────────────────────────────────────────────────────
+app.post("/api/pay/razorpay/order", async (req, res) => {
+  try {
+    const { amount, notes = {} } = req.body;
+    if (!amount || isNaN(amount)) {
+      return res.status(400).json({ error: "Valid amount (in INR) required" });
+    }
+    const order = await rzp.orders.create({
+      amount: Math.round(Number(amount) * 100), // to paise
+      currency: "INR",
+      receipt: `ill_${Date.now()}`,
+      notes,
+    });
+    return res.json({ order });
+  } catch (err) {
+    console.error("Razorpay order error:", err?.response?.data || err.message);
+    return res.status(500).json({ error: "Failed to create order" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// RAZORPAY: Verify payment signature
+// POST /api/pay/razorpay/verify
+// body: { razorpay_payment_id, razorpay_order_id, razorpay_signature }
+// returns: { success: true/false }
+// ─────────────────────────────────────────────────────────────
+app.post("/api/pay/razorpay/verify", async (req, res) => {
+  try {
+    const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body || {};
+    if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+      return res.status(400).json({ success: false, error: "Missing fields" });
+    }
+
+    const payload = `${razorpay_order_id}|${razorpay_payment_id}`;
+    const expected = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(payload)
+      .digest("hex");
+
+    const success = expected === razorpay_signature;
+    return res.json({ success });
+  } catch (err) {
+    console.error("Razorpay verify error:", err.message);
+    return res.status(500).json({ success: false, error: "Verification failed" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// RAZORPAY: Webhook (optional but recommended)
+// IMPORTANT: needs the RAW body, not JSON-parsed.
+// Place THIS raw-body middleware BEFORE any json/bodyParser for this route.
+// If bodyParser.json() is already mounted globally above, add this explicit
+// raw handler on the route like below (works route-scoped).
+// Set the same secret in Razorpay Dashboard.
+// ─────────────────────────────────────────────────────────────
+app.post(
+  "/api/pay/razorpay/webhook",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    try {
+      const signature = req.headers["x-razorpay-signature"];
+      const body = req.body;           // Buffer
+      const bodyStr = body.toString(); // string
+
+      const expected = crypto
+        .createHmac("sha256", process.env.RAZORPAY_WEBHOOK_SECRET)
+        .update(bodyStr)
+        .digest("hex");
+
+      if (expected !== signature) {
+        return res.status(400).send("Invalid webhook signature");
+      }
+
+      const event = JSON.parse(bodyStr);
+
+      // Handle events you care about:
+      // payment.captured, payment.failed, order.paid, etc.
+      if (event.event === "payment.captured") {
+        const p = event.payload.payment.entity;
+        // p.id, p.order_id, p.amount, p.status...
+        // TODO: mark your sale paid using p.order_id or notes
+      }
+
+      res.status(200).json({ received: true });
+    } catch (e) {
+      console.error("Webhook processing error:", e.message);
+      res.status(500).send("Webhook error");
+    }
+  }
+);
+
 
 // Configure Multer for file uploads
 const storage = multer.diskStorage({
@@ -182,6 +289,92 @@ const dlvClean = (v) => (v == null ? v : String(v).replace(/[&#%\\;]/g, " ").tri
 // Build URL-encoded body: format=json&data=<JSON>
 const buildFormBody = (payload) =>
   new URLSearchParams({ format: "json", data: JSON.stringify(payload) });
+
+
+// ===== Delhivery: Quick Quote (pincode -> amount) =====
+// GET /api/shipping/delhivery/quick-quote?d_pin=560001
+// -> { ok: true, amount: <number|null>, request: {...}, raw: {...} }
+
+// ===== Delhivery: Quick Quote (pincode -> amount) =====
+// GET /api/shipping/delhivery/quick-quote?d_pin=560001
+
+const ORIGIN_PIN_FIXED = "695029"; // your fixed origin
+
+app.get("/api/shipping/delhivery/quick-quote", async (req, res) => {
+  try {
+    const d_pin = String(req.query.d_pin || "").trim();
+
+    if (!/^[1-9]\d{5}$/.test(d_pin)) {
+      return res.status(400).json({ ok: false, error: "Invalid destination pincode" });
+    }
+    if (!DELHIVERY_TOKEN) {
+      return res.status(500).json({ ok: false, error: "Server missing DELHIVERY_TOKEN" });
+    }
+
+    const params = {
+      md: "S",               // Express
+      ss: "Delivered",       // forward
+      pt: "Pre-paid",        // payment
+      cgm: 200,              // 200 g fixed
+      o_pin: ORIGIN_PIN_FIXED,
+      d_pin,
+    };
+
+    const { data } = await axios.get(
+      `${DELHIVERY_BASE_URL}/api/kinko/v1/invoice/charges/.json`,
+      {
+        params,
+        headers: {
+          Authorization: `Token ${DELHIVERY_TOKEN}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        timeout: 15000,
+      }
+    );
+
+    // Normalize Delhivery response (array or object)
+    const row = Array.isArray(data) ? data[0] : data;
+
+    const taxesTotal =
+      Number(row?.tax_data?.IGST || 0) +
+      Number(row?.tax_data?.CGST || 0) +
+      Number(row?.tax_data?.SGST || 0) +
+      Number(row?.tax_data?.swacch_bharat_tax || 0) +
+      Number(row?.tax_data?.krishi_kalyan_cess || 0);
+
+    const amt =
+      (row && (
+        row.total_amount ??
+        row.amount ??
+        (row.gross_amount != null ? Number(row.gross_amount) + taxesTotal : null)
+      )) ?? null;
+
+    return res.json({
+      ok: true,
+      request: params,
+      amount: amt != null ? Number(amt) : null,
+      breakdown: row ? {
+        zone: row.zone,
+        charged_weight: row.charged_weight,
+        gross_amount: row.gross_amount,
+        taxes: row.tax_data,
+        base_dl: row.charge_DL,
+        peak: row.charge_PEAK,
+        dph: row.charge_DPH,
+      } : null,
+      raw: data,
+    });
+  } catch (e) {
+    console.error("Delhivery quick-quote error:", e.response?.data || e.message);
+    return res.status(e.response?.status || 502).json({
+      ok: false,
+      error: "Delhivery API error",
+      details: e.response?.data || { message: e.message },
+    });
+  }
+});
+
 
 /**
  * createDelhiveryShipment
