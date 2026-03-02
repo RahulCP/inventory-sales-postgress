@@ -684,6 +684,19 @@ app.post("/api/phonepe/webhook", async (req, res) => {
     const name = metaInfo?.udf1 || "N/A"; // Could be phone number, etc.
     const email = metaInfo?.udf2 || "N/A"; // Could be user ID, etc.
     const phone = metaInfo?.udf3 || "N/A"; // Could be user ID, etc.
+    // ✅ NEW: ignore NEW app transactions
+    // We use udf4 as the marker (ex: "NEWILLOLAM" or "NEWILLOLAM|illolam")
+    const appMarker = String(metaInfo?.udf4 || "").trim().toUpperCase();
+    if (appMarker === "NEWILLOLAM" || appMarker.startsWith("NEWILLOLAM|")) {
+      console.log("🟡 Ignoring webhook in OLD app (NEWILLOLAM):", {
+        event,
+        upiTransactionId,
+        udf4: metaInfo?.udf4,
+      });
+
+      // Return 200 so PhonePe considers it delivered (no retries)
+      return res.status(200).json({ success: true, message: "Ignored: handled by new app" });
+    }
 
     if (!upiTransactionId) {
       console.warn("⚠️ Missing UPI Transaction ID");
